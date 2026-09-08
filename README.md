@@ -1,2 +1,2 @@
 # BrekemStudio
-Master mix by stems distritable audio ai clean batchs
+Master mix by stems distributable audio ai clean batchs
