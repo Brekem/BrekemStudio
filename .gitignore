@@ -1,0 +1,14 @@
+dist/
+build/work/
+build/*/
+__pycache__/
+*.pyc
+models/
+vendor/
+refs/
+*.wav
+*.mp3
+*.flac
+*.exe
+*.zip
+build/*.log

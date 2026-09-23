@@ -1,0 +1,17 @@
+# BREKEM STUDIO - runtime dependencies (CPU only)
+# Install into a clean venv:  py -3.10 -m venv .venv && .venv\Scripts\pip install -r requirements.txt
+numpy>=1.24,<2.0
+scipy>=1.10
+soundfile>=0.12
+librosa>=0.10
+pyloudnorm>=0.1.1
+pedalboard>=0.9.10
+matchering==2.0.6
+statsmodels>=0.14
+pandas>=2.0
+demucs>=4.0
+deepfilternet>=0.5.6
+torch==2.8.0
+torchaudio==2.8.0
+# packaging only:
+pyinstaller>=6.6
