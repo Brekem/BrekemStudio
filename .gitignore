@@ -12,3 +12,4 @@ refs/
 *.exe
 *.zip
 build/*.log
+*.log
