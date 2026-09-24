@@ -14,7 +14,7 @@ Outputs per song:
 
 | Tab | Use |
 |-----|-----|
-| **Máster** | One finished mix in → 4 deliverables out. Separates (Demucs) + cleans the vocal (DeepFilterNet) automatically. |
+| **Máster** | One finished mix in → 4 deliverables out. Separates every stem (Demucs) + cleans the vocal (DeepFilterNet) automatically. |
 | **Lote** | A whole folder of songs, one after another. |
 | **Mezcla desde stems** | Your recorded vocal + a beat delivered as stems → auto mix + master. |
 | **Distribuible** | Any finished audio → loudness-normalised (2-pass), true-peak ≤ −1 dBTP, exported as 48k/24 + 44.1k/16 WAV + MP3 320. No separation, no references, no tonal change. Fast. |
@@ -25,6 +25,36 @@ No internet is needed, ever — not even on first run, not on a fresh machine.
 
 "Más cariño" = more parameter-search attempts per song plus a polish pass that
 pulls the worst tonal axis toward the centre without breaking the 6/6.
+
+## Separation (stems)
+
+Every song is split into all the stems the chosen Demucs model gives, not just
+voice + instrumental:
+
+| Option | Model | Stems |
+|--------|-------|-------|
+| 4 stems, best quality (default) | `htdemucs_ft` | vocals, drums, bass, other |
+| 6 stems | `htdemucs_6s` | + guitar, piano (those two are the weakest) |
+| 4 stems, fast | `htdemucs` | vocals, drums, bass, other |
+
+The beat is then rebuilt stem by stem: transient punch on the drums only (not
+on the 808), bass low end folded to mono, and the rest gets a small dip at
+1.8–5 kHz while the vocal is singing so the voice sits in front.
+
+The processed (cleaned) vocal is only used where the vocal stem really holds a
+vocal. Everywhere else — intro, beat breaks, the song's tail — the mix uses the
+untouched separation, and the ACAPELLA is silent there. That removes the
+"interference" the old chain made from the separation bleed at the end of songs.
+
+Stems are cached per song + model in `%LOCALAPPDATA%\BrekemStudio\stems`.
+
+## Loudness
+
+All loudness targets are reached with one static gain + a 4x-oversampled
+true-peak limiter. Nothing rides the level up and down: the old Distribute
+step used ffmpeg `loudnorm`, which for loud targets falls back to its dynamic
+mode and pumps, and the master's dynamics expander followed hi-hats and the
+vocal instead of loudness (level dropped whenever the vocal stopped).
 
 ## References — read this
 
@@ -40,8 +70,13 @@ py -3.10 -m venv .venv
 .venv\Scripts\python BrekemStudio.py
 ```
 
-First run downloads the Demucs (~80 MB) and DeepFilterNet models to
-`%LOCALAPPDATA%\BrekemStudio\models`.
+First run downloads the Demucs weights for the chosen separation model
+(`htdemucs_ft` ≈ 4 × 80 MB, `htdemucs_6s` / `htdemucs` ≈ 80 MB each) and the
+DeepFilterNet model to `%LOCALAPPDATA%\BrekemStudio\models`. If the chosen
+model can't be loaded, separation falls back to `htdemucs`.
+
+CLI: `python brekem_cli.py master "<song>" "<out>" --sep htdemucs_6s --shifts 2`
+(`--shifts 2` = cleaner separation, twice the time).
 
 ## Build the installer
 

@@ -158,20 +158,26 @@ def deplosive(voc,n):
     return voc, len(pl)
 
 # ---------- pase final (igual que masterfinal.py) ----------
-def kweight(x): return sig.sosfilt(sig.butter(2,1500/(SR/2),btype="high",output="sos"),x)
-def macro_expand(x,ratio,lo=-9.0,hi=3.0,att=0.15,rel=0.8):
-    mono=x.mean(1); w=int(0.4*SR); hop=int(0.1*SR); kw=kweight(mono); n=len(mono)
-    env=[10*np.log10(np.mean(kw[i:i+w]**2)+1e-12) for i in range(0,n-w,hop)]
-    env=np.array(env)
-    if len(env)<4: return x
+_KW_SOS=np.array([[1.53512485958697,-2.69169618940638,1.19839281085285,1.0,-1.69065929318241,0.73248077421585],
+                  [1.0,-2.0,1.0,1.0,-1.99004745483398,0.99007225036621]])   # ITU-R BS.1770 K-weighting @48k
+def kweight(x):
+    # real loudness weighting. It used to be a 1.5 kHz high-pass, so the expanders
+    # followed hi-hats and the vocal, not loudness: the level dropped every time the
+    # vocal stopped (outros, song tails) and came back with the next hat -> pumping.
+    return sig.sosfilt(_KW_SOS,x)
+def macro_expand(x,ratio,lo=-3.0,hi=2.0,win=3.0,smooth_hz=0.12):
+    """slow, gentle upward/downward expansion on short-term loudness (3 s, K-weighted),
+    zero-phase smoothed so the gain drifts between sections instead of riding every
+    bar. Range clipped to lo..hi dB: a fade-out or a quiet tail just sits at `lo`
+    (constant gain) instead of being pushed down and pulled back up."""
+    mono=x.mean(1); w=int(win*SR); hop=int(0.1*SR); kw=kweight(mono); n=len(mono)
+    if n<w+8*hop: return x
+    env=np.array([10*np.log10(np.mean(kw[i:i+w]**2)+1e-12) for i in range(0,n-w+1,hop)])
     centre=np.percentile(env,55)
-    g=np.clip((env-centre)*(ratio-1.0),lo,hi)
-    out=np.zeros_like(g); prev=0.0
-    aA=np.exp(-1.0/(att*SR/hop)); aR=np.exp(-1.0/(rel*SR/hop))
-    for i,v in enumerate(g):
-        a=aA if v>prev else aR; prev=a*prev+(1-a)*v; out[i]=prev
-    tsamp=np.arange(n); tenv=np.arange(len(out))*hop+w//2
-    return x*(10**(np.interp(tsamp,tenv,out)/20.0))[:,None]
+    g=np.clip((env-centre)*min(ratio-1.0,0.35),lo,hi)
+    g=sig.sosfiltfilt(sig.butter(2,smooth_hz/(SR/hop/2),btype="low",output="sos"),g)
+    tsamp=np.arange(n); tenv=np.arange(len(g))*hop+w//2
+    return x*(10**(np.interp(tsamp,tenv,g)/20.0))[:,None]
 def bq_peak(x,f0,g_db,Q):
     A=10**(g_db/40);w0=2*np.pi*f0/SR;al=np.sin(w0)/(2*Q);c=np.cos(w0)
     b=np.array([1+al*A,-2*c,1-al*A]);a=np.array([1+al/A,-2*c,1-al/A])

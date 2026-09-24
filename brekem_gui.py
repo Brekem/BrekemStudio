@@ -12,6 +12,11 @@ import brekem_cli as C
 
 APP = "BREKEM STUDIO"
 PAD = 8
+SEP_CHOICES = (  # label -> Demucs model used by prep.py
+    ("4 stems, best quality (vocals / drums / bass / other)", "htdemucs_ft"),
+    ("6 stems (+ guitar / piano, lower quality on those two)", "htdemucs_6s"),
+    ("4 stems, fast", "htdemucs"),
+)
 AUDIO_FT = (("Audio", "*.wav *.flac *.mp3 *.m4a *.aac *.ogg *.opus *.aif *.aiff *.wma"),
             ("All files", "*.*"))
 
@@ -86,6 +91,14 @@ class App(ttk.Frame):
         if p:
             var.set(p)
 
+    def _sep_row(self, f, row):
+        """'Separation' dropdown; returns a getter for the chosen Demucs model."""
+        var = tk.StringVar(value=SEP_CHOICES[0][0])
+        ttk.Label(f, text="Separation:").grid(row=row, column=0, sticky="w", pady=(6, 0))
+        ttk.Combobox(f, textvariable=var, state="readonly", values=[c[0] for c in SEP_CHOICES]).grid(
+            row=row, column=1, sticky="ew", padx=6, pady=(6, 0))
+        return lambda: dict(SEP_CHOICES).get(var.get(), SEP_CHOICES[0][1])
+
     def _run_bg(self, fn, needs_refs=True):
         if self.busy:
             messagebox.showinfo(APP, "A job is already running.")
@@ -126,11 +139,13 @@ class App(ttk.Frame):
         ttk.Button(f, text="...", width=3, command=lambda: self._pick_dir(self.m_out)).grid(row=1, column=2)
         ttk.Checkbutton(f, text="Extra care (more attempts + tonal polish)", variable=self.m_care).grid(
             row=2, column=1, sticky="w", padx=6)
-        ttk.Button(f, text="Master", command=self._go_master).grid(row=3, column=1, sticky="w", padx=6, pady=(10, 0))
+        self.m_sep = self._sep_row(f, 3)
+        ttk.Button(f, text="Master", command=self._go_master).grid(row=4, column=1, sticky="w", padx=6, pady=(10, 0))
         ttk.Label(f, text="Makes MASTER / INSTRUMENTAL / ACAPELLA / APPLE DIGITAL MASTER  + FLAC + MP3-320.\n"
+                          "The song is split into every stem; drums, bass and the rest are mixed separately.\n"
                           "With references set: matches their average tone + loudness and reports a 6-axis verdict.\n"
                           "With no references: a self master that gets the best out of the source.",
-                  foreground="#7b8794").grid(row=4, column=0, columnspan=3, sticky="w", pady=(10, 0))
+                  foreground="#7b8794").grid(row=5, column=0, columnspan=3, sticky="w", pady=(10, 0))
 
     def _go_master(self):
         a, o = self.m_in.get().strip(), self.m_out.get().strip()
@@ -138,7 +153,8 @@ class App(ttk.Frame):
             messagebox.showwarning(APP, "Pick a song."); return
         if not o:
             messagebox.showwarning(APP, "Pick an output folder."); return
-        self._run_bg(lambda: C.master_one(a, o, care=self.m_care.get(), log=self.log))
+        sep = self.m_sep()
+        self._run_bg(lambda: C.master_one(a, o, care=self.m_care.get(), log=self.log, sep=sep))
 
     # ---------- tab: batch ----------
     def tab_batch(self, nb):
@@ -155,8 +171,9 @@ class App(ttk.Frame):
         ttk.Entry(f, textvariable=self.b_out).grid(row=1, column=1, sticky="ew", padx=6)
         ttk.Button(f, text="...", width=3, command=lambda: self._pick_dir(self.b_out)).grid(row=1, column=2)
         ttk.Checkbutton(f, text="Extra care", variable=self.b_care).grid(row=2, column=1, sticky="w", padx=6)
+        self.b_sep = self._sep_row(f, 3)
         ttk.Button(f, text="Process folder", command=self._go_batch).grid(
-            row=3, column=1, sticky="w", padx=6, pady=(10, 0))
+            row=4, column=1, sticky="w", padx=6, pady=(10, 0))
 
     def _go_batch(self):
         i, o = self.b_in.get().strip(), self.b_out.get().strip()
@@ -164,7 +181,8 @@ class App(ttk.Frame):
             messagebox.showwarning(APP, "Pick the songs folder."); return
         if not o:
             messagebox.showwarning(APP, "Pick an output folder."); return
-        self._run_bg(lambda: C.batch(i, o, care=self.b_care.get(), log=self.log))
+        sep = self.b_sep()
+        self._run_bg(lambda: C.batch(i, o, care=self.b_care.get(), log=self.log, sep=sep))
 
     # ---------- tab: mix from stems ----------
     def tab_stem(self, nb):
@@ -227,16 +245,18 @@ class App(ttk.Frame):
         d_lufs.trace_add("write", lambda *_: lbl.configure(text=f"{d_lufs.get():.1f}"))
         ttk.Checkbutton(f, text="Also output INSTRUMENTAL and ACAPELLA (separates with Demucs, takes a few min)",
                         variable=d_split).grid(row=3, column=1, sticky="w", padx=6, pady=(6, 0))
-        note = ("Makes the audio upload-ready: loudness-normalise (2-pass) + true-peak -1 dBTP.\n"
+        d_sep = self._sep_row(f, 4)
+        note = ("Makes the audio upload-ready: one fixed gain to the target loudness + true-peak -1 dBTP\n"
+                "(no automatic level riding, so nothing pumps).\n"
                 "Each track as WAV 48k/24 + WAV 44.1k/16 + MP3 320.\n"
                 "-9.5 LUFS = loud (urban).  -14 LUFS = streaming-platform standard.")
         if clean:
             note = ("AI clean first (denoise / de-static, de-breath, de-plosive, de-reverb on the vocal),\n"
                     "then the same distribute step.\n") + note
         ttk.Button(f, text="Clean + distribute" if clean else "Regulate audio",
-                   command=lambda: self._go_distrib(d_in, d_out, d_lufs, d_split, clean)).grid(
-            row=4, column=1, sticky="w", padx=6, pady=(10, 0))
-        ttk.Label(f, text=note, foreground="#7b8794").grid(row=5, column=0, columnspan=3, sticky="w", pady=(10, 0))
+                   command=lambda: self._go_distrib(d_in, d_out, d_lufs, d_split, clean, d_sep())).grid(
+            row=5, column=1, sticky="w", padx=6, pady=(10, 0))
+        ttk.Label(f, text=note, foreground="#7b8794").grid(row=6, column=0, columnspan=3, sticky="w", pady=(10, 0))
 
     def tab_distrib(self, nb):
         self._distrib_panel(nb, "Distribute", clean=False)
@@ -244,7 +264,7 @@ class App(ttk.Frame):
     def tab_clean(self, nb):
         self._distrib_panel(nb, "AI Clean + Distribute", clean=True)
 
-    def _go_distrib(self, d_in, d_out, d_lufs, d_split, clean):
+    def _go_distrib(self, d_in, d_out, d_lufs, d_split, clean, sep):
         i, o = d_in.get().strip(), d_out.get().strip()
         if not (i and os.path.exists(i)):
             messagebox.showwarning(APP, "Pick an audio file or a folder."); return
@@ -252,10 +272,12 @@ class App(ttk.Frame):
             messagebox.showwarning(APP, "Pick an output folder."); return
         lufs, sp = float(d_lufs.get()), bool(d_split.get())
         if os.path.isdir(i):
-            self._run_bg(lambda: C.distribute_batch(i, o, target_lufs=lufs, split=sp, clean=clean, log=self.log),
+            self._run_bg(lambda: C.distribute_batch(i, o, target_lufs=lufs, split=sp, clean=clean, log=self.log,
+                                                    sep=sep),
                          needs_refs=False)
         else:
-            self._run_bg(lambda: C.distribute(i, o, target_lufs=lufs, split=sp, clean=clean, log=self.log),
+            self._run_bg(lambda: C.distribute(i, o, target_lufs=lufs, split=sp, clean=clean, log=self.log,
+                                              sep=sep),
                          needs_refs=False)
 
     # ---------- tab: references ----------

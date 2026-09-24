@@ -29,6 +29,7 @@ from acap_pro import (SR, load, rms, run, ebur, bands_arr, deepfilter, vbus, glu
                       bbmatch, kweight, WORK, STEMS,
                       debreath_at, deplosive_gated, dereverb, eq_sub, plate, loud_to)
 import re, matchering as mg
+import stems as ST
 try:
     mg.log(info_handler=lambda *a, **k: None, warning_handler=lambda *a, **k: None)
 except Exception:
@@ -158,6 +159,8 @@ L(f"=== track_v2: {NAME}  (tag={TAG}) ===")
 if not (os.path.exists(VC) and os.path.exists(IC)):
     L("NO STEMS -> abort"); sys.exit(1)
 voc = load(VC); n = len(voc); r0 = rms(voc)
+RAW = voc.copy()
+VACT = ST.vocal_activity(RAW, load(IC))               # where the vocal stem really holds a vocal
 voc = deepfilter(voc, n)
 voc, nb  = debreath_at(voc, n, at_db=-9.0)
 voc, npl = deplosive_gated(voc, n)
@@ -174,9 +177,9 @@ from acap_pro import bq_peak    # peak de presencia opcional (argv[7])
 
 # 1) MASTER
 oM = os.path.join(OUT, PFX + "MASTER.wav")
-inst = transient_shape(load(IC))
-vmix = VOX*(r0/rms(VOX))*10**(1.0/20)
-vmix = 0.6*plate(vmix) + 0.4*vmix
+inst = ST.instrumental(TAG, transient_shape, VACT, log=L)
+vmix = ST.gate(VOX*(r0/rms(VOX))*10**(1.0/20), VACT)
+vmix = 0.6*plate(vmix) + 0.4*vmix + ST.bleed(RAW, VACT)
 mm = min(len(vmix), len(inst)); mix = glue(vmix[:mm] + inst[:mm])
 mix = polish(mix); mix = dyn_eq(mix); mix = tape_sat(mix, wet=0.16); mix = widen_highs(mix, 9000, 1.30)
 pk = np.max(np.abs(mix)); mix = mix*(0.99/pk) if pk > 0.99 else mix
@@ -197,7 +200,7 @@ Im, Lm, Tm = ebur(oM); L(f"[1] MASTER       I={Im:6.1f} LRA={Lm:4.1f} TP={Tm:5.1
 
 # 2) INSTRUMENTAL
 oI = os.path.join(OUT, PFX + "INSTRUMENTAL.wav")
-inst = glue(transient_shape(load(IC), boost_db=2.5))   # menos boost -> menos crest
+inst = glue(ST.instrumental(TAG, lambda x: transient_shape(x, boost_db=2.5), log=L))   # menos boost -> menos crest
 pk = np.max(np.abs(inst)); inst = inst*(0.99/pk) if pk > 0.99 else inst
 pB = libmaster(w(os.path.join(WORK, "tv_i0.wav"), inst), os.path.join(WORK, "tv_i1.wav"))
 y = mono_narrow(polish(load(pB)), 0.82)                 # estrecha ANTES de limitar -> mas headroom
@@ -209,7 +212,7 @@ Ii, Li, Ti = ebur(oI); L(f"[2] INSTRUMENTAL I={Ii:6.1f} LRA={Li:4.1f} TP={Ti:5.1
 
 # 3) ACAPELLA
 oA = os.path.join(OUT, PFX + "ACAPELLA.wav")
-va = plate(VOX); rr = rms(va); va = va*(r0/rr) if rr > 0 else va
+va = plate(ST.gate(VOX, VACT)); rr = rms(va); va = va*(r0/rr) if rr > 0 else va
 pk = np.max(np.abs(va)); va = va*(0.98/pk) if pk > 0.98 else va
 loud_to(w(os.path.join(WORK, "tv_a0.wav"), va), oA, Itgt=-12.0, tp_lin=0.891, drive=0.89)
 Ia, La, Ta = ebur(oA); L(f"[3] ACAPELLA     I={Ia:6.1f} LRA={La:4.1f} TP={Ta:5.1f}")

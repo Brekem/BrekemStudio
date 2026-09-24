@@ -156,24 +156,40 @@ _PLATE = Pedalboard([
 def eq_sub(x):   return _EQ(x.astype(np.float32), SR).astype(np.float64)
 def plate(x):    return _PLATE(x.astype(np.float32), SR).astype(np.float64)
 
+_LAT=[":latency=1"]   # alimiter delay compensation (ffmpeg >= 5.1); dropped if the ffmpeg is older
+def _limit(src, out, gain_db, drive, tp_lin):
+    """static gain -> 4x-oversampled lookahead limiter -> 48k limiter. Gain is a single
+    number for the whole song: no AGC, so nothing can ride the level up and down."""
+    while True:
+        lat=_LAT[0]
+        af=(f"volume={gain_db:.2f}dB,aresample=192000:resampler=soxr:precision=28,"
+            f"alimiter=limit={drive}:level=0:asc=1{lat},aresample=48000:resampler=soxr:precision=28,"
+            f"alimiter=limit={tp_lin}:level=0{lat}")
+        r=run(["ffmpeg","-hide_banner","-y","-i",src,"-af",af,"-ar","48000","-c:a","pcm_s24le",out])
+        if r.returncode==0 and os.path.exists(out): return True
+        if not lat: return False
+        _LAT[0]=""
+def fade_tail(path, ms=15.0):
+    """a song that stops on a non-zero sample clicks; fade the last few ms to zero."""
+    try:
+        y,s=sf.read(path,dtype="float64",always_2d=True)
+        k=min(len(y),int(ms/1000*s))
+        if k<2 or np.max(np.abs(y[-k:]))<1e-4: return
+        y[-k:]*=(0.5+0.5*np.cos(np.linspace(0,np.pi,k)))[:,None]
+        sf.write(path,y,s,subtype="PCM_24")
+    except Exception:
+        pass
 def loud_to(src, out, Itgt, tp_lin, drive=0.90):
     I3,_,_=ebur(src); I3 = I3 if I3 is not None else -14.0
     gain=float(np.clip(Itgt-1.0-I3, -12.0, 14.0))
-    af=(f"volume={gain:.2f}dB,aresample=192000:resampler=soxr:precision=28,"
-        f"alimiter=limit={drive}:level=0:asc=1,aresample=48000:resampler=soxr:precision=28,"
-        f"alimiter=limit={tp_lin}:level=0")
-    r=run(["ffmpeg","-hide_banner","-y","-i",src,"-af",af,"-ar","48000","-c:a","pcm_s24le",out])
-    if r.returncode!=0 or not os.path.exists(out): return None
+    if not _limit(src,out,gain,drive,tp_lin): return None
     I,Lr,T=ebur(out)
     if I is not None and abs(I-Itgt)>0.4:
         g2=float(np.clip(Itgt-I,-4.0,4.0)); tt=os.path.join(WORK,"ap_l.wav")
-        r2=run(["ffmpeg","-hide_banner","-y","-i",out,"-af",
-                f"volume={g2:.2f}dB,aresample=192000:resampler=soxr,alimiter=limit={drive}:level=0:asc=1,"
-                f"aresample=48000:resampler=soxr,alimiter=limit={tp_lin}:level=0",
-                "-ar","48000","-c:a","pcm_s24le",tt])
-        if r2.returncode==0 and os.path.exists(tt): os.replace(tt,out); I,Lr,T=ebur(out)
+        if _limit(out,tt,g2,drive,tp_lin): os.replace(tt,out)
         try: os.remove(tt)
         except: pass
+    fade_tail(out)
     return ebur(out)
 
 def build_one(vc, out, tagshow):

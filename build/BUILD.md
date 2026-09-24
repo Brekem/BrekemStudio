@@ -39,10 +39,15 @@ For DeepFilterNet: if `libdf` / the model tar is missing at runtime, confirm
 to `datas` explicitly.
 
 ## Model weights
-By default the frozen app downloads Demucs (~80 MB) + DeepFilterNet weights on
-first run to `%LOCALAPPDATA%\BrekemStudio\models`. To ship fully offline,
-pre-populate that folder on your build machine (run the app once), then add its
+By default the frozen app downloads the Demucs weights of the separation model
+the user picks (`htdemucs_ft` = 4 checkpoints ≈ 320 MB, `htdemucs_6s` and
+`htdemucs` ≈ 80 MB each) + DeepFilterNet weights on first run to
+`%LOCALAPPDATA%\BrekemStudio\models`. To ship fully offline, pre-populate that
+folder on your build machine (run one song with EACH separation option once,
+so all three models land in `models\torch\hub\checkpoints`), then add its
 contents to `[Files]` in `installer.iss` under `DestDir: "{localappdata}\BrekemStudio\models"`.
+Without the `htdemucs_ft` weights the app still works offline: prep.py falls
+back to `htdemucs`.
 
 ## Size trim (optional)
 - swap `vendor\ffmpeg.exe`/`ffprobe.exe` for the gyan.dev *essentials* build (~90 MB vs 222 MB each)

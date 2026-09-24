@@ -6,10 +6,11 @@ MASTER / INSTRUMENTAL / ACAPELLA / APPLE DIGITAL MASTER + FLAC + MP3-320 + the
 when no references are set).
 
 CLI:
-  brekem_cli.py master   "<audio>"   "<outdir>" [--fast]
-  brekem_cli.py batch    "<folder>"  "<outdir>" [--fast]
+  brekem_cli.py master   "<audio>"   "<outdir>" [--fast] [--sep MODEL] [--shifts N]
+  brekem_cli.py batch    "<folder>"  "<outdir>" [--fast] [--sep MODEL] [--shifts N]
   brekem_cli.py stemmix  "<stemdir>" "<voxfile>" "<outdir>" [--vox -3.0]
-  brekem_cli.py distribute "<audio|folder>" "<outdir>" [--lufs -9.5] [--no-split] [--clean]
+  brekem_cli.py distribute "<audio|folder>" "<outdir>" [--lufs -9.5] [--no-split] [--clean] [--sep MODEL]
+MODEL (stem separation): htdemucs_ft (default, 4 stems, best) | htdemucs_6s (6 stems) | htdemucs (fast)
 """
 import os, re, sys, glob, shutil, argparse
 import brekem_env as E
@@ -20,6 +21,8 @@ DELTA_RE = re.compile(
 OKN_RE = re.compile(r"(\d+)/6 axes")
 AX_LBL = {"low": "low  +-1.5 dB", "pres": "pres +-1.5 dB", "air": "air  +-1.5 dB", "stereo": "stereo in range"}
 DELIV = ("MASTER", "INSTRUMENTAL", "ACAPELLA", "APPLE DIGITAL MASTER")
+SEP_MODELS = ("htdemucs_ft", "htdemucs_6s", "htdemucs")
+SEP_DEFAULT = "htdemucs_ft"
 
 
 def _safe_tag(path):
@@ -96,6 +99,12 @@ def _refine(par, d):
     return round(sh, 2), round(air, 2), round(pr, 2)
 
 
+def _prep(audio, tag, sep, shifts, log):
+    """separate into all the stems the model gives (cached per song + model)."""
+    return E.run_engine("prep.py", [os.path.abspath(audio), tag, sep or SEP_DEFAULT, str(max(1, int(shifts)))],
+                        on_line=lambda s: log("  " + s))
+
+
 def _encode_extras(folder, log):
     import subprocess
     ff = E.FFMPEG
@@ -113,10 +122,10 @@ def _encode_extras(folder, log):
 
 
 # ------------------------------------------------------------------ master (ref)
-def _master_noref(audio, outdir, log):
+def _master_noref(audio, outdir, log, sep=None, shifts=1):
     tag = _safe_tag(audio)
     log(f"=== {os.path.basename(audio)}  (no references -> self master)")
-    rc = E.run_engine("prep.py", [audio, tag], on_line=lambda s: log("  " + s))
+    rc = _prep(audio, tag, sep, shifts, log)
     if rc != 0:
         log("!! Separation failed."); return {"ok": -1, "reason": "prep-failed"}
     os.makedirs(outdir, exist_ok=True)
@@ -137,13 +146,13 @@ def _master_noref(audio, outdir, log):
     return {"ok": score, "mode": "noref", "outdir": outdir}
 
 
-def master_one(audio, outdir, care=True, log=print):
+def master_one(audio, outdir, care=True, log=print, sep=None, shifts=1):
     E.apply_env()
     if not E.have_refs():
-        return _master_noref(audio, outdir, log)
+        return _master_noref(audio, outdir, log, sep, shifts)
     tag = _safe_tag(audio)
     log(f"=== {os.path.basename(audio)}  (tag={tag})")
-    rc = E.run_engine("prep.py", [audio, tag], on_line=lambda s: log("  " + s))
+    rc = _prep(audio, tag, sep, shifts, log)
     if rc != 0:
         log("!! Separation failed."); return {"ok": -1, "reason": "prep-failed"}
 
@@ -200,7 +209,7 @@ def master_one(audio, outdir, care=True, log=print):
     return {"ok": bok, "tonal": _tonal(bd), "params": bpar, "outdir": outdir}
 
 
-def batch(folder, outroot, care=True, log=print):
+def batch(folder, outroot, care=True, log=print, sep=None, shifts=1):
     files = sorted({p for e in AUDIO_EXT for p in glob.glob(os.path.join(folder, "*" + e))})
     if not files:
         log("!! No audio in the folder."); return
@@ -210,7 +219,7 @@ def batch(folder, outroot, care=True, log=print):
         name = os.path.splitext(os.path.basename(f))[0]
         od = os.path.join(outroot, f"{i:02d} - {name}")
         log(f"\n----- [{i}/{len(files)}] {name} -----")
-        r = master_one(f, od, care=care, log=log)
+        r = master_one(f, od, care=care, log=log, sep=sep, shifts=shifts)
         res.append((name, r.get("ok", -1)))
     log("\n=== BATCH SUMMARY ===")
     for name, k in res:
@@ -277,19 +286,6 @@ def stemmix(stemdir, voxfile, outdir, vox=-3.0, care=True, log=print):
 
 
 # ------------------------------------------------------------------ distribute
-def _ff_json(args):
-    import subprocess, json
-    r = subprocess.run([E.FFMPEG, "-hide_banner", "-nostats"] + args + ["-f", "null", "-"],
-                       capture_output=True, text=True,
-                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    s = r.stderr
-    a, b = s.rfind("{"), s.rfind("}")
-    try:
-        return json.loads(s[a:b + 1])
-    except Exception:
-        return {}
-
-
 def _ebur(path):
     import subprocess
     r = subprocess.run([E.FFMPEG, "-hide_banner", "-nostats", "-i", path,
@@ -303,25 +299,66 @@ def _ebur(path):
     return g("I", "LUFS"), g("LRA", "LU"), g("Peak", "dBFS")
 
 
-def _regulate(src, dst_dir, kind, target_lufs, tp, log):
-    """loudnorm 2-pass + true-peak limit -> <kind> {48k24,44k16}.wav + <kind>.mp3"""
+_LAT = [":latency=1"]   # alimiter delay compensation (ffmpeg >= 5.1); dropped if unsupported
+
+
+def _limit(src, dst, gain_db, tp):
+    """one static gain for the whole song -> 4x-oversampled lookahead limiter -> 48k
+    limiter a hair under the target true-peak. No AGC anywhere."""
     import subprocess
     cf = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    m = _ff_json(["-i", src, "-af", f"loudnorm=I={target_lufs}:TP={tp}:LRA=11:print_format=json"])
-    af = f"loudnorm=I={target_lufs}:TP={tp}:LRA=11"
-    if all(k in m for k in ("input_i", "input_tp", "input_lra", "input_thresh", "target_offset")):
-        af += (f":measured_I={m['input_i']}:measured_TP={m['input_tp']}"
-               f":measured_LRA={m['input_lra']}:measured_thresh={m['input_thresh']}"
-               f":offset={m['target_offset']}:linear=true")
-    # limiter ~0.4 dB stricter than the target so measured true-peak lands <= tp
-    af += ",alimiter=limit={:.4f}:level=0".format(10 ** ((tp - 0.4) / 20.0))
+    while True:
+        lat = _LAT[0]
+        af = (f"volume={gain_db:.2f}dB,aresample=192000:resampler=soxr:precision=28,"
+              f"alimiter=limit={10 ** ((tp - 0.5) / 20.0):.4f}:level=0:asc=1{lat},"
+              f"aresample=48000:resampler=soxr:precision=28,"
+              f"alimiter=limit={10 ** ((tp - 0.3) / 20.0):.4f}:level=0{lat}")
+        r = subprocess.run([E.FFMPEG, "-v", "error", "-y", "-i", src, "-af", af,
+                            "-ar", "48000", "-c:a", "pcm_s24le", dst], creationflags=cf)
+        if r.returncode == 0 and os.path.exists(dst):
+            return True
+        if not lat:
+            return False
+        _LAT[0] = ""
+
+
+def _fade_tail(path, ms=15.0):
+    """a song that stops on a non-zero sample clicks; fade the last few ms to zero."""
+    try:
+        import numpy as np, soundfile as sf
+        y, s = sf.read(path, dtype="float64", always_2d=True)
+        k = min(len(y), int(ms / 1000 * s))
+        if k < 2 or np.max(np.abs(y[-k:])) < 1e-4:
+            return
+        y[-k:] *= (0.5 + 0.5 * np.cos(np.linspace(0, np.pi, k)))[:, None]
+        sf.write(path, y, s, subtype="PCM_24")
+    except Exception:
+        pass
+
+
+def _regulate(src, dst_dir, kind, target_lufs, tp, log):
+    """static gain + true-peak limit -> <kind> {48k24,44k16}.wav + <kind>.mp3
+    (ffmpeg's loudnorm was used here before: for loud targets it can never stay in
+    'linear' mode, falls back to its dynamic AGC and pumps - the level goes down and
+    up, worst on quiet endings. A single gain, re-measured, can't do that.)"""
+    import subprocess
+    cf = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     w48 = os.path.join(dst_dir, f"{kind} 48k24.wav")
     w44 = os.path.join(dst_dir, f"{kind} 44k16.wav")
     mp3 = os.path.join(dst_dir, f"{kind}.mp3")
-    subprocess.run([E.FFMPEG, "-v", "error", "-y", "-i", src, "-af", af,
-                    "-ar", "48000", "-c:a", "pcm_s24le", w48], creationflags=cf)
+    i0 = _ebur(src)[0]
+    gain = target_lufs - (i0 if i0 is not None else -14.0)
+    for _ in range(3):                      # the limiter eats some gain: re-aim from the source
+        gain = max(-20.0, min(20.0, gain))
+        if not _limit(src, w48, gain, tp):
+            log(f"  !! {kind}: ffmpeg failed"); return None, None, None
+        i1 = _ebur(w48)[0]
+        if i1 is None or abs(i1 - target_lufs) <= 0.3:
+            break
+        gain += target_lufs - i1
+    _fade_tail(w48)
     subprocess.run([E.FFMPEG, "-v", "error", "-y", "-i", w48,
-                    "-af", "aresample=44100:resampler=soxr:precision=28",
+                    "-af", "aresample=44100:resampler=soxr:precision=28:dither_method=triangular_hp",
                     "-c:a", "pcm_s16le", w44], creationflags=cf)
     subprocess.run([E.FFMPEG, "-v", "error", "-y", "-i", w48,
                     "-c:a", "libmp3lame", "-b:a", "320k", "-id3v2_version", "3", mp3],
@@ -331,9 +368,10 @@ def _regulate(src, dst_dir, kind, target_lufs, tp, log):
     return i1, lra1, tp1
 
 
-def distribute(audio, outdir, target_lufs=-9.5, tp=-1.0, split=True, clean=False, log=print):
-    """Make a finished audio distribution-ready: loudness-normalise (2-pass) + true-peak
-    limit. Outputs MASTER (and, when split=True, INSTRUMENTAL + ACAPELLA via Demucs),
+def distribute(audio, outdir, target_lufs=-9.5, tp=-1.0, split=True, clean=False, log=print,
+               sep=None):
+    """Make a finished audio distribution-ready: one static gain to the target loudness
+    + true-peak limit. Outputs MASTER (and, when split=True, INSTRUMENTAL + ACAPELLA via Demucs),
     each as WAV 48k/24 + WAV 44.1k/16 + MP3 320. clean=True runs an AI clean pass
     (denoise/dereverb + de-breath + de-plosive on the vocal) before regulating.
     No references, no tonal re-balancing."""
@@ -350,7 +388,7 @@ def distribute(audio, outdir, target_lufs=-9.5, tp=-1.0, split=True, clean=False
     if split or clean:
         tag = _safe_tag(audio)
         log("  separating (Demucs)... this takes a few minutes")
-        rc = E.run_engine("prep.py", [audio, tag], on_line=lambda s: log("  " + s))
+        rc = _prep(audio, tag, sep, 1, log)
         vc = os.path.join(E.STEMS, tag, "vocals.flac")
         ic = os.path.join(E.STEMS, tag, "no_vocals.flac")
         if rc != 0 or not (os.path.exists(vc) and os.path.exists(ic)):
@@ -382,7 +420,8 @@ def distribute(audio, outdir, target_lufs=-9.5, tp=-1.0, split=True, clean=False
     return {"in_lufs": i0, "outdir": outdir, "tracks": list(res)}
 
 
-def distribute_batch(folder, outroot, target_lufs=-9.5, tp=-1.0, split=True, clean=False, log=print):
+def distribute_batch(folder, outroot, target_lufs=-9.5, tp=-1.0, split=True, clean=False, log=print,
+                     sep=None):
     files = sorted({p for e in AUDIO_EXT for p in glob.glob(os.path.join(folder, "*" + e))})
     if not files:
         log("!! No audio in the folder."); return
@@ -391,7 +430,7 @@ def distribute_batch(folder, outroot, target_lufs=-9.5, tp=-1.0, split=True, cle
         name = os.path.splitext(os.path.basename(f))[0]
         od = os.path.join(outroot, f"{i:02d} - {name}")
         log(f"\n--- [{i}/{len(files)}] {name} ---")
-        distribute(f, od, target_lufs=target_lufs, tp=tp, split=split, clean=clean, log=log)
+        distribute(f, od, target_lufs=target_lufs, tp=tp, split=split, clean=clean, log=log, sep=sep)
 
 
 def _cli():
@@ -399,21 +438,25 @@ def _cli():
     sub = ap.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("master"); a.add_argument("audio"); a.add_argument("outdir"); a.add_argument("--fast", action="store_true")
     b = sub.add_parser("batch"); b.add_argument("folder"); b.add_argument("outdir"); b.add_argument("--fast", action="store_true")
+    for p in (a, b):
+        p.add_argument("--sep", choices=SEP_MODELS, default=SEP_DEFAULT)
+        p.add_argument("--shifts", type=int, default=1)
     c = sub.add_parser("stemmix"); c.add_argument("stemdir"); c.add_argument("voxfile"); c.add_argument("outdir"); c.add_argument("--vox", type=float, default=-3.0)
     d = sub.add_parser("distribute"); d.add_argument("path"); d.add_argument("outdir")
     d.add_argument("--lufs", type=float, default=-9.5); d.add_argument("--tp", type=float, default=-1.0)
     d.add_argument("--no-split", action="store_true"); d.add_argument("--clean", action="store_true")
+    d.add_argument("--sep", choices=SEP_MODELS, default=SEP_DEFAULT)
     ns = ap.parse_args()
     if ns.cmd == "master":
-        master_one(ns.audio, ns.outdir, care=not ns.fast)
+        master_one(ns.audio, ns.outdir, care=not ns.fast, sep=ns.sep, shifts=ns.shifts)
     elif ns.cmd == "batch":
-        batch(ns.folder, ns.outdir, care=not ns.fast)
+        batch(ns.folder, ns.outdir, care=not ns.fast, sep=ns.sep, shifts=ns.shifts)
     elif ns.cmd == "stemmix":
         stemmix(ns.stemdir, ns.voxfile, ns.outdir, vox=ns.vox)
     elif ns.cmd == "distribute":
         sp = not ns.no_split
         fn = distribute_batch if os.path.isdir(ns.path) else distribute
-        fn(ns.path, ns.outdir, target_lufs=ns.lufs, tp=ns.tp, split=sp, clean=ns.clean)
+        fn(ns.path, ns.outdir, target_lufs=ns.lufs, tp=ns.tp, split=sp, clean=ns.clean, sep=ns.sep)
 
 
 if __name__ == "__main__":

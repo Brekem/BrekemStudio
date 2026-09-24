@@ -12,6 +12,7 @@ import acap_pro as AP
 from acap_pro import (SR, load, rms, ebur, bands_arr, deepfilter, vbus, glue, polish,
                       kweight, WORK, STEMS, debreath_at, deplosive_gated, dereverb,
                       eq_sub, plate, loud_to, bq_shelf, bq_peak, macro_expand)
+import stems as ST
 
 NAME = sys.argv[1]
 OUT  = sys.argv[2]
@@ -78,6 +79,8 @@ if not (os.path.exists(VC) and os.path.exists(IC)):
 
 # ---- vocal pro (same cleaning chain as the reference master) ----
 voc = load(VC); n = len(voc); r0 = rms(voc)
+RAW = voc.copy()
+VACT = ST.vocal_activity(RAW, load(IC))      # where the vocal stem really holds a vocal
 voc = deepfilter(voc, n)
 voc, nb = debreath_at(voc, n, at_db=-9.0)
 voc, npl = deplosive_gated(voc, n)
@@ -89,9 +92,9 @@ L(f"vocal pro: breath={nb} plos={npl}")
 
 # ---- 1) MASTER ----
 oM = os.path.join(OUT, PFX + "MASTER.wav")
-inst = transient_shape(load(IC))
-vmix = VOX * (r0 / rms(VOX)) * 10 ** (1.0 / 20)
-vmix = 0.6 * plate(vmix) + 0.4 * vmix
+inst = ST.instrumental(TAG, transient_shape, VACT, log=L)
+vmix = ST.gate(VOX * (r0 / rms(VOX)) * 10 ** (1.0 / 20), VACT)
+vmix = 0.6 * plate(vmix) + 0.4 * vmix + ST.bleed(RAW, VACT)
 mm = min(len(vmix), len(inst))
 mix = glue(vmix[:mm] + inst[:mm])
 mix = polish(mix)                    # M/S low mono-fold + 280 Hz dip + de-harsh 6-8.5k
@@ -108,7 +111,7 @@ L(f"[1] MASTER       I={Im:6.1f} LRA={Lm:4.1f} TP={Tm:5.1f}")
 
 # ---- 2) INSTRUMENTAL ----
 oI = os.path.join(OUT, PFX + "INSTRUMENTAL.wav")
-y = glue(transient_shape(load(IC), boost_db=2.5))
+y = glue(ST.instrumental(TAG, lambda x: transient_shape(x, boost_db=2.5), log=L))
 y = mono_narrow(polish(y), 0.82)
 y = bq_shelf(y, 80.0, 1.0, False)
 y = np.tanh(y * 1.5) / np.tanh(1.5)
@@ -119,7 +122,7 @@ L(f"[2] INSTRUMENTAL I={Ii:6.1f} LRA={Li:4.1f} TP={Ti:5.1f}")
 
 # ---- 3) ACAPELLA ----
 oA = os.path.join(OUT, PFX + "ACAPELLA.wav")
-va = plate(VOX); rr = rms(va)
+va = plate(ST.gate(VOX, VACT)); rr = rms(va)
 va = va * (r0 / rr) if rr > 0 else va
 pk = np.max(np.abs(va)); va = va * (0.98 / pk) if pk > 0.98 else va
 loud_to(w(os.path.join(WORK, "nr_a0.wav"), va), oA, Itgt=-12.0, tp_lin=0.891, drive=0.89)
