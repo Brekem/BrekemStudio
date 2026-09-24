@@ -6,8 +6,9 @@ MASTER / INSTRUMENTAL / ACAPELLA / APPLE DIGITAL MASTER + FLAC + MP3-320 + the
 when no references are set).
 
 CLI:
-  brekem_cli.py master   "<audio>"   "<outdir>" [--fast] [--sep MODEL] [--shifts N]
-  brekem_cli.py batch    "<folder>"  "<outdir>" [--fast] [--sep MODEL] [--shifts N]
+  brekem_cli.py master   "<audio>"   "<outdir>" [--fast] [--sep MODEL] [--shifts N] [--variants]
+  brekem_cli.py batch    "<folder>"  "<outdir>" [--fast] [--sep MODEL] [--shifts N] [--variants]
+--variants: also the same song in 8 master styles (+ COMPARE.html) in <outdir>/VARIANTS
   brekem_cli.py stemmix  "<stemdir>" "<voxfile>" "<outdir>" [--vox -3.0]
   brekem_cli.py distribute "<audio|folder>" "<outdir>" [--lufs -9.5] [--no-split] [--clean] [--sep MODEL]
 MODEL (stem separation): htdemucs_ft (default, 4 stems, best) | htdemucs_6s (6 stems) | htdemucs (fast)
@@ -105,6 +106,16 @@ def _prep(audio, tag, sep, shifts, log):
                         on_line=lambda s: log("  " + s))
 
 
+def _variants(tag, outdir, log):
+    """the same song in 8 master styles + COMPARE.html (see engine/variants.py)."""
+    vd = os.path.join(os.path.abspath(outdir), "VARIANTS")
+    log("--- master variants (CD / Clarity / Espacial / Punch / Warm / Club / Streaming / Signature)")
+    rc = E.run_engine("variants.py", [tag, vd], on_line=lambda s: log("  " + s))
+    if rc != 0:
+        log("!! variants failed")
+    return vd
+
+
 def _encode_extras(folder, log):
     import subprocess
     ff = E.FFMPEG
@@ -122,7 +133,7 @@ def _encode_extras(folder, log):
 
 
 # ------------------------------------------------------------------ master (ref)
-def _master_noref(audio, outdir, log, sep=None, shifts=1):
+def _master_noref(audio, outdir, log, sep=None, shifts=1, variants=False):
     tag = _safe_tag(audio)
     log(f"=== {os.path.basename(audio)}  (no references -> self master)")
     rc = _prep(audio, tag, sep, shifts, log)
@@ -142,14 +153,16 @@ def _master_noref(audio, outdir, log, sep=None, shifts=1):
             shutil.copy2(s, os.path.join(outdir, k + ".wav"))
     _encode_extras(outdir, log)
     shutil.rmtree(stage, ignore_errors=True)
+    if variants:
+        _variants(tag, outdir, log)
     log(f"=> DONE {os.path.basename(audio)}  {score}/4 targets  -> {outdir}")
     return {"ok": score, "mode": "noref", "outdir": outdir}
 
 
-def master_one(audio, outdir, care=True, log=print, sep=None, shifts=1):
+def master_one(audio, outdir, care=True, log=print, sep=None, shifts=1, variants=False):
     E.apply_env()
     if not E.have_refs():
-        return _master_noref(audio, outdir, log, sep, shifts)
+        return _master_noref(audio, outdir, log, sep, shifts, variants)
     tag = _safe_tag(audio)
     log(f"=== {os.path.basename(audio)}  (tag={tag})")
     rc = _prep(audio, tag, sep, shifts, log)
@@ -205,11 +218,13 @@ def master_one(audio, outdir, care=True, log=print, sep=None, shifts=1):
     _encode_extras(outdir, log)
     shutil.rmtree(stage, ignore_errors=True)
     _cleanup_keep()
+    if variants:
+        _variants(tag, outdir, log)
     log(f"=> DONE {os.path.basename(audio)}  {bok}/6  tonal {_tonal(bd):.1f}  -> {outdir}")
     return {"ok": bok, "tonal": _tonal(bd), "params": bpar, "outdir": outdir}
 
 
-def batch(folder, outroot, care=True, log=print, sep=None, shifts=1):
+def batch(folder, outroot, care=True, log=print, sep=None, shifts=1, variants=False):
     files = sorted({p for e in AUDIO_EXT for p in glob.glob(os.path.join(folder, "*" + e))})
     if not files:
         log("!! No audio in the folder."); return
@@ -219,7 +234,7 @@ def batch(folder, outroot, care=True, log=print, sep=None, shifts=1):
         name = os.path.splitext(os.path.basename(f))[0]
         od = os.path.join(outroot, f"{i:02d} - {name}")
         log(f"\n----- [{i}/{len(files)}] {name} -----")
-        r = master_one(f, od, care=care, log=log, sep=sep, shifts=shifts)
+        r = master_one(f, od, care=care, log=log, sep=sep, shifts=shifts, variants=variants)
         res.append((name, r.get("ok", -1)))
     log("\n=== BATCH SUMMARY ===")
     for name, k in res:
@@ -441,6 +456,7 @@ def _cli():
     for p in (a, b):
         p.add_argument("--sep", choices=SEP_MODELS, default=SEP_DEFAULT)
         p.add_argument("--shifts", type=int, default=1)
+        p.add_argument("--variants", action="store_true", help="also make the 8 master styles")
     c = sub.add_parser("stemmix"); c.add_argument("stemdir"); c.add_argument("voxfile"); c.add_argument("outdir"); c.add_argument("--vox", type=float, default=-3.0)
     d = sub.add_parser("distribute"); d.add_argument("path"); d.add_argument("outdir")
     d.add_argument("--lufs", type=float, default=-9.5); d.add_argument("--tp", type=float, default=-1.0)
@@ -448,9 +464,9 @@ def _cli():
     d.add_argument("--sep", choices=SEP_MODELS, default=SEP_DEFAULT)
     ns = ap.parse_args()
     if ns.cmd == "master":
-        master_one(ns.audio, ns.outdir, care=not ns.fast, sep=ns.sep, shifts=ns.shifts)
+        master_one(ns.audio, ns.outdir, care=not ns.fast, sep=ns.sep, shifts=ns.shifts, variants=ns.variants)
     elif ns.cmd == "batch":
-        batch(ns.folder, ns.outdir, care=not ns.fast, sep=ns.sep, shifts=ns.shifts)
+        batch(ns.folder, ns.outdir, care=not ns.fast, sep=ns.sep, shifts=ns.shifts, variants=ns.variants)
     elif ns.cmd == "stemmix":
         stemmix(ns.stemdir, ns.voxfile, ns.outdir, vox=ns.vox)
     elif ns.cmd == "distribute":

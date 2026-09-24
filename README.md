@@ -48,6 +48,37 @@ untouched separation, and the ACAPELLA is silent there. That removes the
 
 Stems are cached per song + model in `%LOCALAPPDATA%\BrekemStudio\stems`.
 
+## Master styles (VARIANTS)
+
+Tick "Also make 8 master styles" (on by default in the Master tab) and the same
+song comes out in 8 styles in `<output>\VARIANTS\`, each as WAV + MP3, with
+`COMPARE.html`: open it in the browser, press play and click between styles —
+it switches at the same second so you compare on the same part of the song.
+
+| Style | What it does |
+|-------|--------------|
+| 01 CD MASTER | balanced, classic CD master (-9.5 LUFS) |
+| 02 CLARITY | vocal +1 dB, less mud at 300 Hz, more presence and air |
+| 03 ESPACIAL | music widened (not the vocal, not the bass), deeper vocal plate |
+| 04 PUNCH | drums forward with extra attack, bass steps aside for the kick, -8.5 LUFS |
+| 05 WARM | tape saturation, low-mid body, softer top |
+| 06 CLUB | big low end, loudest (-7.5 LUFS) |
+| 07 STREAMING -14 | platform loudness, full dynamics, gentle limiting |
+| 08 BREKEM SIGNATURE | clarity + punch + width, plus two layers made from the song itself |
+
+Every style is built from the stems, so it can push the drums without the vocal
+or widen the music without the bass. BREKEM SIGNATURE adds:
+
+- **Harmonic fill** – reads the song's own chords (chroma of the music stems every
+  0.25 s) and plays them as a soft, wide, detuned pad. It only plays where the
+  song is tonal (silent in drum breaks), swells with the music and sits 6 dB lower
+  while the vocal sings.
+- **Shimmer** – an octave-up long reverb of the music stems (no vocal, no drums)
+  that opens the top and fills the gaps, ducked under the vocal.
+
+`_VARIANTS.txt` lists loudness, dynamics, true peak, tone and stereo per style.
+CLI: `brekem_cli.py master "<song>" "<out>" --variants`.
+
 ## Loudness
 
 All loudness targets are reached with one static gain + a 4x-oversampled

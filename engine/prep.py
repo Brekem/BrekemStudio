@@ -93,7 +93,7 @@ arrs["no_vocals"] = np.sum([arrs[k] for k in inst], axis=0)
 # one common gain for every stem (keeps the balance between them) if any would clip
 pk = max(float(np.max(np.abs(a))) for a in arrs.values())
 gain = 0.999 / pk if pk > 0.999 else 1.0
-for f in glob.glob(os.path.join(sd, "*.flac")):
+for f in glob.glob(os.path.join(sd, "*.flac")) + glob.glob(os.path.join(sd, "*.wav")):
     os.remove(f)
 for k, a in arrs.items():
     sf.write(os.path.join(sd, k + ".flac"), a * gain, sr, subtype="PCM_24")

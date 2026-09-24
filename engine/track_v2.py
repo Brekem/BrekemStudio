@@ -168,6 +168,7 @@ voc = dereverb(voc)
 voc = eq_sub(voc)
 voc = vbus(voc)
 VOX = voc.copy()
+sf.write(os.path.join(STEMS, TAG, "vocals_proc.wav"), VOX.astype(np.float32), SR, subtype="FLOAT")   # reused by variants.py
 L(f"vocal pro: breath={nb} plos={npl}")
 
 def w(tmp, arr): sf.write(tmp, arr.astype(np.float32), SR, subtype="PCM_24"); return tmp

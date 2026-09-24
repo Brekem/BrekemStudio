@@ -180,15 +180,15 @@ def fade_tail(path, ms=15.0):
     except Exception:
         pass
 def loud_to(src, out, Itgt, tp_lin, drive=0.90):
+    """static gain + limiter to Itgt LUFS. The limiter eats part of the gain, so re-aim
+    from the SOURCE (never re-limit the output) until within 0.3 LU, 4 tries max."""
     I3,_,_=ebur(src); I3 = I3 if I3 is not None else -14.0
-    gain=float(np.clip(Itgt-1.0-I3, -12.0, 14.0))
-    if not _limit(src,out,gain,drive,tp_lin): return None
-    I,Lr,T=ebur(out)
-    if I is not None and abs(I-Itgt)>0.4:
-        g2=float(np.clip(Itgt-I,-4.0,4.0)); tt=os.path.join(WORK,"ap_l.wav")
-        if _limit(out,tt,g2,drive,tp_lin): os.replace(tt,out)
-        try: os.remove(tt)
-        except: pass
+    gain=float(np.clip(Itgt-I3, -12.0, 18.0))
+    for _ in range(4):
+        if not _limit(src,out,gain,drive,tp_lin): return None
+        I,Lr,T=ebur(out)
+        if I is None or abs(I-Itgt)<=0.3: break
+        gain=float(np.clip(gain+(Itgt-I), -12.0, 18.0))
     fade_tail(out)
     return ebur(out)
 

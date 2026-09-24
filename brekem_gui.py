@@ -140,12 +140,16 @@ class App(ttk.Frame):
         ttk.Checkbutton(f, text="Extra care (more attempts + tonal polish)", variable=self.m_care).grid(
             row=2, column=1, sticky="w", padx=6)
         self.m_sep = self._sep_row(f, 3)
-        ttk.Button(f, text="Master", command=self._go_master).grid(row=4, column=1, sticky="w", padx=6, pady=(10, 0))
+        self.m_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(f, text="Also make 8 master styles to choose from (CD, Clarity, Espacial, Punch, Warm, "
+                               "Club, Streaming, BREKEM Signature) + COMPARE.html", variable=self.m_var).grid(
+            row=4, column=1, sticky="w", padx=6, pady=(6, 0))
+        ttk.Button(f, text="Master", command=self._go_master).grid(row=5, column=1, sticky="w", padx=6, pady=(10, 0))
         ttk.Label(f, text="Makes MASTER / INSTRUMENTAL / ACAPELLA / APPLE DIGITAL MASTER  + FLAC + MP3-320.\n"
                           "The song is split into every stem; drums, bass and the rest are mixed separately.\n"
                           "With references set: matches their average tone + loudness and reports a 6-axis verdict.\n"
                           "With no references: a self master that gets the best out of the source.",
-                  foreground="#7b8794").grid(row=5, column=0, columnspan=3, sticky="w", pady=(10, 0))
+                  foreground="#7b8794").grid(row=6, column=0, columnspan=3, sticky="w", pady=(10, 0))
 
     def _go_master(self):
         a, o = self.m_in.get().strip(), self.m_out.get().strip()
@@ -153,8 +157,8 @@ class App(ttk.Frame):
             messagebox.showwarning(APP, "Pick a song."); return
         if not o:
             messagebox.showwarning(APP, "Pick an output folder."); return
-        sep = self.m_sep()
-        self._run_bg(lambda: C.master_one(a, o, care=self.m_care.get(), log=self.log, sep=sep))
+        sep, care, var = self.m_sep(), self.m_care.get(), self.m_var.get()
+        self._run_bg(lambda: C.master_one(a, o, care=care, log=self.log, sep=sep, variants=var))
 
     # ---------- tab: batch ----------
     def tab_batch(self, nb):
@@ -172,8 +176,11 @@ class App(ttk.Frame):
         ttk.Button(f, text="...", width=3, command=lambda: self._pick_dir(self.b_out)).grid(row=1, column=2)
         ttk.Checkbutton(f, text="Extra care", variable=self.b_care).grid(row=2, column=1, sticky="w", padx=6)
         self.b_sep = self._sep_row(f, 3)
+        self.b_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(f, text="Also make the 8 master styles for every song (slower)", variable=self.b_var).grid(
+            row=4, column=1, sticky="w", padx=6, pady=(6, 0))
         ttk.Button(f, text="Process folder", command=self._go_batch).grid(
-            row=4, column=1, sticky="w", padx=6, pady=(10, 0))
+            row=5, column=1, sticky="w", padx=6, pady=(10, 0))
 
     def _go_batch(self):
         i, o = self.b_in.get().strip(), self.b_out.get().strip()
@@ -181,8 +188,8 @@ class App(ttk.Frame):
             messagebox.showwarning(APP, "Pick the songs folder."); return
         if not o:
             messagebox.showwarning(APP, "Pick an output folder."); return
-        sep = self.b_sep()
-        self._run_bg(lambda: C.batch(i, o, care=self.b_care.get(), log=self.log, sep=sep))
+        sep, care, var = self.b_sep(), self.b_care.get(), self.b_var.get()
+        self._run_bg(lambda: C.batch(i, o, care=care, log=self.log, sep=sep, variants=var))
 
     # ---------- tab: mix from stems ----------
     def tab_stem(self, nb):
