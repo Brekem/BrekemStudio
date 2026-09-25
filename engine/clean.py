@@ -28,6 +28,7 @@ voc = dereverb(voc)                           # tail / reverb
 voc = eq_sub(voc)                             # subtractive EQ (HPF + nasal/harsh dips)
 voc = vbus(voc)                               # vocal bus: de-ess + comp + presence/air
 rr = rms(voc); voc = voc * (r0 / rr) if rr > 0 else voc
+sf.write(os.path.join(sd, "vocals_proc.wav"), voc.astype(np.float32), SR, subtype="FLOAT")   # reused by variants.py
 voc = ST.gate(voc, act)                       # bleed out of the acapella between phrases / in the tail
 print(f"clean: breath={nb} plosives={npl}", flush=True)
 

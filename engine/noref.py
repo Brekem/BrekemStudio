@@ -105,6 +105,8 @@ mix = bq_shelf(mix, 12000.0, 1.0, True) # gentle air
 _, lra0, _ = ebur(w(os.path.join(WORK, "nr_m0.wav"), mix)); lra0 = lra0 or 6.0
 if lra0 < 6.0:
     mix = macro_expand(mix, ratio=1.25 + (6.0 - lra0) * 0.22)   # recover crushed dynamics
+if ST.guard_enabled():                                          # every band inside the song's own range
+    mix = ST.guard(mix, ST._fit(RAW, len(mix)) + ST._fit(load(IC), len(mix)), tone_tol_db=3.0, log=L)
 pk = np.max(np.abs(mix)); mix = mix * (0.995 / pk) if pk > 0.995 else mix
 loud_to(w(os.path.join(WORK, "nr_m1.wav"), mix), oM, Itgt=-9.5, tp_lin=0.891, drive=0.88)
 Im, Lm, Tm = ebur(oM)
@@ -115,6 +117,8 @@ oI = os.path.join(OUT, PFX + "INSTRUMENTAL.wav")
 y = glue(ST.instrumental(TAG, lambda x: transient_shape(x, boost_db=2.5), log=L))
 y = mono_narrow(polish(y), 0.82)
 y = bq_shelf(y, 80.0, 1.0, False)
+if ST.guard_enabled():
+    y = ST.guard(y, ST._fit(load(IC), len(y)), tone_tol_db=3.0, log=L)
 y = np.tanh(y * 1.5) / np.tanh(1.5)
 pk = np.max(np.abs(y)); y = y * (0.995 / pk) if pk > 0.995 else y
 loud_to(w(os.path.join(WORK, "nr_i1.wav"), y), oI, Itgt=-9.5, tp_lin=0.891, drive=0.88)

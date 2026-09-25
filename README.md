@@ -77,7 +77,31 @@ or widen the music without the bass. BREKEM SIGNATURE adds:
   that opens the top and fills the gaps, ducked under the vocal.
 
 `_VARIANTS.txt` lists loudness, dynamics, true peak, tone and stereo per style.
-CLI: `brekem_cli.py master "<song>" "<out>" --variants`.
+
+Every tab except References has the style boxes: mark with **[X]** each style you
+want and only those are made (none marked = none made). Master, Batch, Mix from
+stems, Distribute and AI Clean + Distribute all put them in `<output>\VARIANTS\`.
+CLI: `--styles punch,signature` (or `--styles all`) on any command.
+
+## Extras (their own [X] in every tab, on by default)
+
+**Bass centred + dry** — the bass/808 stem is processed on its own:
+everything under 250 Hz folded to mono (the sub stays centred on every system),
+nothing under 28 Hz, a decay expander that pulls each note's tail/room down by up
+to 8 dB once it falls 8 dB under the note's peak (so notes stop cleanly instead
+of ringing into each other), ~4:1 compression so every note hits the same, and a
+2 dB dip on each kick hit. CLI: `--no-dry-bass` to turn it off.
+
+**Band guard** — the result is split into 5 bands (sub/bass <120 Hz, low-mid
+120-500, mid 500-2k, high-mid 2-6k, high >6k; the split adds back up exactly)
+and compared with the original song at the same loudness:
+- *tone*: a band's share may move at most 3 dB (masters) / 4 dB (styles) from
+  the original's; beyond that a static gain brings it back to the edge
+- *peaks*: each band's 10 ms peaks may exceed the original's by at most 1.5 dB;
+  overs are pulled down by a smooth per-band limiter, so one band (an 808 boom,
+  an "S", a hi-hat) can't slam the final limiter and distort everything else.
+In Distribute it only applies the peak part (the file is its own reference).
+CLI: `--no-guard` to turn it off.
 
 ## Loudness
 

@@ -17,6 +17,10 @@ SEP_CHOICES = (  # label -> Demucs model used by prep.py
     ("6 stems (+ guitar / piano, lower quality on those two)", "htdemucs_6s"),
     ("4 stems, fast", "htdemucs"),
 )
+STYLE_CHOICES = (  # id (brekem_cli.STYLE_IDS) -> box label
+    ("cd", "CD Master"), ("clarity", "Clarity"), ("espacial", "Espacial"), ("punch", "Punch"),
+    ("warm", "Warm"), ("club", "Club"), ("streaming", "Streaming -14"), ("signature", "BREKEM Signature"),
+)
 AUDIO_FT = (("Audio", "*.wav *.flac *.mp3 *.m4a *.aac *.ogg *.opus *.aif *.aiff *.wma"),
             ("All files", "*.*"))
 
@@ -91,6 +95,35 @@ class App(ttk.Frame):
         if p:
             var.set(p)
 
+    def _xbox(self, parent, label, value=False):
+        """a toggle that reads [X] when on, [  ] when off."""
+        var = tk.BooleanVar(value=value)
+        b = tk.Checkbutton(parent, variable=var, indicatoron=False, anchor="w", relief="flat",
+                           offrelief="flat", overrelief="groove", bd=1, padx=6, pady=2,
+                           font=("Consolas", 10), selectcolor="#e0b04a", cursor="hand2")
+        upd = lambda *_: b.configure(text=("[X] " if var.get() else "[  ] ") + label)
+        var.trace_add("write", upd); upd()
+        return b, var
+
+    def _opts_panel(self, f, row, styles=()):
+        """styles (each its own [X]) + dry bass [X] + band guard [X]; returns a getter."""
+        box = ttk.LabelFrame(f, text="Master styles  (mark with X the ones you want, each comes out separately)",
+                             padding=6)
+        box.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+        picks = []
+        for i, (sid, lbl) in enumerate(STYLE_CHOICES):
+            b, v = self._xbox(box, lbl, sid in styles)
+            b.grid(row=i // 4, column=i % 4, sticky="w", padx=(0, 10))
+            picks.append((sid, v))
+        ext = ttk.LabelFrame(f, text="Extras", padding=6)
+        ext.grid(row=row + 1, column=0, columnspan=3, sticky="ew", pady=(6, 0))
+        b1, dry = self._xbox(ext, "Bass centred + dry (mono low end, tight tail, steady, out of the kick's way)", True)
+        b1.grid(row=0, column=0, sticky="w")
+        b2, grd = self._xbox(ext, "Band guard (vocal / beat / bass / mids / highs stay inside the song's own range)",
+                             True)
+        b2.grid(row=1, column=0, sticky="w")
+        return lambda: dict(variants=[sid for sid, v in picks if v.get()], dry=dry.get(), guard=grd.get())
+
     def _sep_row(self, f, row):
         """'Separation' dropdown; returns a getter for the chosen Demucs model."""
         var = tk.StringVar(value=SEP_CHOICES[0][0])
@@ -140,10 +173,7 @@ class App(ttk.Frame):
         ttk.Checkbutton(f, text="Extra care (more attempts + tonal polish)", variable=self.m_care).grid(
             row=2, column=1, sticky="w", padx=6)
         self.m_sep = self._sep_row(f, 3)
-        self.m_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(f, text="Also make 8 master styles to choose from (CD, Clarity, Espacial, Punch, Warm, "
-                               "Club, Streaming, BREKEM Signature) + COMPARE.html", variable=self.m_var).grid(
-            row=4, column=1, sticky="w", padx=6, pady=(6, 0))
+        self.m_opts = self._opts_panel(f, 7)
         ttk.Button(f, text="Master", command=self._go_master).grid(row=5, column=1, sticky="w", padx=6, pady=(10, 0))
         ttk.Label(f, text="Makes MASTER / INSTRUMENTAL / ACAPELLA / APPLE DIGITAL MASTER  + FLAC + MP3-320.\n"
                           "The song is split into every stem; drums, bass and the rest are mixed separately.\n"
@@ -157,8 +187,8 @@ class App(ttk.Frame):
             messagebox.showwarning(APP, "Pick a song."); return
         if not o:
             messagebox.showwarning(APP, "Pick an output folder."); return
-        sep, care, var = self.m_sep(), self.m_care.get(), self.m_var.get()
-        self._run_bg(lambda: C.master_one(a, o, care=care, log=self.log, sep=sep, variants=var))
+        sep, care, kw = self.m_sep(), self.m_care.get(), self.m_opts()
+        self._run_bg(lambda: C.master_one(a, o, care=care, log=self.log, sep=sep, **kw))
 
     # ---------- tab: batch ----------
     def tab_batch(self, nb):
@@ -176,11 +206,9 @@ class App(ttk.Frame):
         ttk.Button(f, text="...", width=3, command=lambda: self._pick_dir(self.b_out)).grid(row=1, column=2)
         ttk.Checkbutton(f, text="Extra care", variable=self.b_care).grid(row=2, column=1, sticky="w", padx=6)
         self.b_sep = self._sep_row(f, 3)
-        self.b_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(f, text="Also make the 8 master styles for every song (slower)", variable=self.b_var).grid(
-            row=4, column=1, sticky="w", padx=6, pady=(6, 0))
         ttk.Button(f, text="Process folder", command=self._go_batch).grid(
             row=5, column=1, sticky="w", padx=6, pady=(10, 0))
+        self.b_opts = self._opts_panel(f, 7)
 
     def _go_batch(self):
         i, o = self.b_in.get().strip(), self.b_out.get().strip()
@@ -188,8 +216,8 @@ class App(ttk.Frame):
             messagebox.showwarning(APP, "Pick the songs folder."); return
         if not o:
             messagebox.showwarning(APP, "Pick an output folder."); return
-        sep, care, var = self.b_sep(), self.b_care.get(), self.b_var.get()
-        self._run_bg(lambda: C.batch(i, o, care=care, log=self.log, sep=sep, variants=var))
+        sep, care, kw = self.b_sep(), self.b_care.get(), self.b_opts()
+        self._run_bg(lambda: C.batch(i, o, care=care, log=self.log, sep=sep, **kw))
 
     # ---------- tab: mix from stems ----------
     def tab_stem(self, nb):
@@ -216,6 +244,7 @@ class App(ttk.Frame):
             row=4, column=1, sticky="w", padx=6, pady=(10, 0))
         ttk.Label(f, text="Stems detected by name: drum / bass / guitar / keys / strings / synth / other.",
                   foreground="#7b8794").grid(row=5, column=0, columnspan=3, sticky="w", pady=(10, 0))
+        self.s_opts = self._opts_panel(f, 7)
 
     def _go_stem(self):
         st, vx, o = self.s_stems.get().strip(), self.s_vox.get().strip(), self.s_out.get().strip()
@@ -225,7 +254,8 @@ class App(ttk.Frame):
             messagebox.showwarning(APP, "Pick your vocal wav."); return
         if not o:
             messagebox.showwarning(APP, "Pick an output folder."); return
-        self._run_bg(lambda: C.stemmix(st, vx, o, vox=float(self.s_vox_off.get()), log=self.log))
+        vox, kw = float(self.s_vox_off.get()), self.s_opts()
+        self._run_bg(lambda: C.stemmix(st, vx, o, vox=vox, log=self.log, **kw))
 
     # ---------- shared distribute panel ----------
     def _distrib_panel(self, nb, tab_text, clean):
@@ -261,9 +291,10 @@ class App(ttk.Frame):
             note = ("AI clean first (denoise / de-static, de-breath, de-plosive, de-reverb on the vocal),\n"
                     "then the same distribute step.\n") + note
         ttk.Button(f, text="Clean + distribute" if clean else "Regulate audio",
-                   command=lambda: self._go_distrib(d_in, d_out, d_lufs, d_split, clean, d_sep())).grid(
+                   command=lambda: self._go_distrib(d_in, d_out, d_lufs, d_split, clean, d_sep(), d_opts())).grid(
             row=5, column=1, sticky="w", padx=6, pady=(10, 0))
         ttk.Label(f, text=note, foreground="#7b8794").grid(row=6, column=0, columnspan=3, sticky="w", pady=(10, 0))
+        d_opts = self._opts_panel(f, 7)
 
     def tab_distrib(self, nb):
         self._distrib_panel(nb, "Distribute", clean=False)
@@ -271,7 +302,7 @@ class App(ttk.Frame):
     def tab_clean(self, nb):
         self._distrib_panel(nb, "AI Clean + Distribute", clean=True)
 
-    def _go_distrib(self, d_in, d_out, d_lufs, d_split, clean, sep):
+    def _go_distrib(self, d_in, d_out, d_lufs, d_split, clean, sep, kw):
         i, o = d_in.get().strip(), d_out.get().strip()
         if not (i and os.path.exists(i)):
             messagebox.showwarning(APP, "Pick an audio file or a folder."); return
@@ -280,11 +311,11 @@ class App(ttk.Frame):
         lufs, sp = float(d_lufs.get()), bool(d_split.get())
         if os.path.isdir(i):
             self._run_bg(lambda: C.distribute_batch(i, o, target_lufs=lufs, split=sp, clean=clean, log=self.log,
-                                                    sep=sep),
+                                                    sep=sep, **kw),
                          needs_refs=False)
         else:
             self._run_bg(lambda: C.distribute(i, o, target_lufs=lufs, split=sp, clean=clean, log=self.log,
-                                              sep=sep),
+                                              sep=sep, **kw),
                          needs_refs=False)
 
     # ---------- tab: references ----------

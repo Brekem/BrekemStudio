@@ -29,6 +29,7 @@ from pedalboard import (Pedalboard, Compressor, Gain, HighpassFilter, LowpassFil
 SP = _HOME
 sys.path.insert(0, SP)
 from acap_pro import deepfilter, deplosive_gated, dereverb   # limpieza de voz
+import stems as ST
 
 SR = 48000
 STEMDIR = sys.argv[1]
@@ -112,7 +113,7 @@ if b is not None:
         Compressor(threshold_db=-22, ratio=3.5, attack_ms=15, release_ms=150),
         Distortion(drive_db=5.0), LowpassFilter(340),
     ]), b)
-    b = mono_fold_low(b, 120.0)
+    b = ST.dry_bass(b) if ST.dry_enabled() else mono_fold_low(b, 120.0)   # centrado y seco
     if "drums" in proc:
         env = np.abs(proc["drums"]).mean(1)
         env = sig.sosfilt(sig.butter(2, 30/(SR/2), output="sos"), env)
@@ -167,10 +168,22 @@ print(f"voz: {lufs(voc):.2f} LUFS  (offset {VOX_OFFSET:+.1f} vs instrumental)", 
 
 # ---------------------------------------------------------------- salidas
 mix = inst + voc
+if ST.guard_enabled():                      # picos por banda (808, eses, hats) dentro de rango
+    mix = ST.guard(mix, mix, log=lambda m: print(m, flush=True))
 pk = np.max(np.abs(mix))
 if pk > 0.98: mix *= 0.98/pk; inst *= 0.98/pk; voc *= 0.98/pk
 
 sf.write(os.path.join(OUTDIR, "INSTRUMENTAL_premix.wav"), inst.astype(np.float32), SR, subtype="PCM_24")
 sf.write(os.path.join(OUTDIR, "VOX_premix.wav"),          voc.astype(np.float32),  SR, subtype="PCM_24")
 sf.write(os.path.join(OUTDIR, "MIX_premix.wav"),          mix.astype(np.float32),  SR, subtype="PCM_24")
+# grupos por separado (drums / bass / other) para los estilos de master (variants.py)
+gd = os.path.join(OUTDIR, "groups"); os.makedirs(gd, exist_ok=True)
+g = {"drums": proc.get("drums"), "bass": proc.get("bass")}
+rest = [v[:n] for k, v in proc.items() if k not in ("drums", "bass")]
+g["other"] = np.sum(rest, 0) if rest else None
+_sum = np.sum([v[:m] for v in proc.values()], 0)                  # same level as the final beat bus
+sc = np.sqrt(np.mean(inst ** 2)) / (np.sqrt(np.mean(_sum ** 2)) + 1e-12)
+for k, v in g.items():
+    if v is not None:
+        sf.write(os.path.join(gd, k + ".wav"), (v[:m] * sc).astype(np.float32), SR, subtype="FLOAT")
 print("LISTO stemmix ->", OUTDIR, flush=True)

@@ -195,6 +195,8 @@ if WIDEN > 1.0 and y.ndim == 2 and y.shape[1] == 2:       # ensancha via M/S (ov
     _mid = (y[:, 0] + y[:, 1]) * 0.5; _side = (y[:, 0] - y[:, 1]) * 0.5 * WIDEN
     y = np.stack([_mid + _side, _mid - _side], 1)
     _pk = np.max(np.abs(y)); y = y * (0.995 / _pk) if _pk > 0.995 else y
+if ST.guard_enabled():                                    # every band inside the song's own range
+    y = ST.guard(y, ST._fit(RAW, len(y)) + ST._fit(load(IC), len(y)), tone_tol_db=3.0, log=L)
 pk = np.max(np.abs(y)); y = y*(0.995/pk) if pk > 0.995 else y
 loud_to(w(os.path.join(WORK, "tv_m3.wav"), y), oM, Itgt=-9.3, tp_lin=0.871, drive=0.87)
 Im, Lm, Tm = ebur(oM); L(f"[1] MASTER       I={Im:6.1f} LRA={Lm:4.1f} TP={Tm:5.1f} corr{corr_of(oM):+.2f}")
@@ -206,6 +208,8 @@ pk = np.max(np.abs(inst)); inst = inst*(0.99/pk) if pk > 0.99 else inst
 pB = libmaster(w(os.path.join(WORK, "tv_i0.wav"), inst), os.path.join(WORK, "tv_i1.wav"))
 y = mono_narrow(polish(load(pB)), 0.82)                 # estrecha ANTES de limitar -> mas headroom
 y = bq_shelf(y, 75.0, SHELF_DB, False)                  # mismo shelf de graves que el master
+if ST.guard_enabled():
+    y = ST.guard(y, ST._fit(load(IC), len(y)), tone_tol_db=3.0, log=L)
 y = np.tanh(y*1.6)/np.tanh(1.6)                         # soft-clip suave: raspa picos, sube RMS alcanzable
 pk = np.max(np.abs(y)); y = y*(0.995/pk) if pk > 0.995 else y
 loud_to(w(os.path.join(WORK, "tv_i2.wav"), y), oI, Itgt=-9.3, tp_lin=0.871, drive=0.87)

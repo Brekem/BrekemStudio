@@ -1,5 +1,6 @@
 """Master VARIANTS: the same song mastered in several styles, to pick by ear.
-Usage:  variants.py "<TAG>" "<outdir>"   (stems must exist at %BREKEM_STEMS%/<TAG>/)
+Usage:  variants.py "<TAG>" "<outdir>" [ids]   (stems must exist at %BREKEM_STEMS%/<TAG>/)
+        ids = comma list of: cd,clarity,espacial,punch,warm,club,streaming,signature (default all)
 Writes: <outdir>/<NN STYLE>.wav + .mp3, _VARIANTS.txt, COMPARE.html (A/B player)
 
 Every style starts from the separated stems (vocal / drums / bass / rest), so a
@@ -31,6 +32,7 @@ from pedalboard import Pedalboard, Reverb, PitchShift, HighpassFilter, LowpassFi
 
 TAG = sys.argv[1]
 OUT = sys.argv[2]
+PICK = [s for s in (sys.argv[3] if len(sys.argv) > 3 else "").split(",") if s]
 os.makedirs(OUT, exist_ok=True)
 SD = os.path.join(STEMS, TAG)
 
@@ -172,7 +174,7 @@ BASE = dict(vox=0.0, drums=0.0, bass=0.0, rest=0.0, punch=3.0, kick_duck=0.0, ca
             low=1.0, mud=0.0, pres=0.0, air=0.5, width=1.05, verb=0.6, tape=0.0,
             lufs=-9.5, drive=0.88, fill=None, shim=None)
 STYLES = [
-    ("01 CD MASTER",        {}),
+    ("01 CD MASTER",        dict()),
     ("02 CLARITY",          dict(vox=1.0, carve=-3.0, mud=-2.0, pres=1.5, air=2.0, lufs=-10.0)),
     ("03 ESPACIAL",         dict(width=1.35, verb=0.8, air=1.0, rest=0.5, lufs=-10.0)),
     ("04 PUNCH",            dict(drums=1.5, punch=5.0, kick_duck=-2.5, low=1.5, lufs=-8.5, drive=0.86)),
@@ -182,6 +184,12 @@ STYLES = [
     ("08 BREKEM SIGNATURE", dict(vox=0.8, drums=0.8, punch=4.0, kick_duck=-1.5, carve=-3.0, mud=-1.5,
                                  pres=1.0, air=1.5, width=1.2, low=1.5, lufs=-9.0, fill=-21.0, shim=-24.0)),
 ]
+
+IDS = ["cd", "clarity", "espacial", "punch", "warm", "club", "streaming", "signature"]
+if PICK:
+    STYLES = [st for i, st in zip(IDS, STYLES) if i in PICK]
+if not STYLES:
+    L("no style picked -> nothing to do"); L("DONE variants"); sys.exit(0)
 
 layers = {}
 def get_layer(name):
@@ -195,17 +203,15 @@ def get_layer(name):
     return layers[name]
 
 rows = []
-kick = None
+GREF = ST.guard_ref(raw + nov) if ST.guard_enabled() else None   # the original song's band ranges
+kick = ST.kick_env(drums) if np.any(drums) else None
+bass_base = ST.dry_bass(bass, kick) if ST.dry_enabled() else ST.mono_low(bass)
 for name, over in STYLES:
     p = dict(BASE, **over)
     L(f"=== {name}")
     dr = transient(drums, p["punch"]) * D(p["drums"])
-    bs = ST.mono_low(bass) * D(p["bass"])
-    if p["kick_duck"] and np.any(drums):
-        if kick is None:                                         # kick envelope, 0..1
-            k = sig.sosfilt(sig.butter(4, 120 / (SR / 2), output="sos"), drums.mean(1))
-            e = np.sqrt(np.convolve(k ** 2, np.ones(int(0.01 * SR)) / int(0.01 * SR), mode="same"))
-            kick = np.clip(e / (np.percentile(e, 99) + 1e-9), 0, 1)
+    bs = bass_base * D(p["bass"])
+    if p["kick_duck"] and kick is not None:
         bs = duck(bs, kick, p["kick_duck"])                      # bass steps aside for the kick
     rs = widen(ST.carve(rest, vact, depth_db=p["carve"]), p["width"]) * D(p["rest"])
     vx = vox * D(p["vox"])
@@ -222,6 +228,8 @@ for name, over in STYLES:
     if p["pres"]: mix = bq_peak(mix, 3500.0, p["pres"], 0.7)
     if p["air"]: mix = bq_shelf(mix, 11000.0, p["air"], True)
     mix = tape(mix, p["tape"])
+    if GREF is not None:                    # style keeps its colour (+-4 dB per band), never leaves the song's range
+        mix = ST.guard(mix, GREF, tone_tol_db=4.0, log=lambda m: L("  " + m))
     pk = np.max(np.abs(mix)); mix = mix * (0.995 / pk) if pk > 0.995 else mix
     wav = os.path.join(OUT, name + ".wav")
     tmp = w(os.path.join(WORK, "vr_in.wav"), mix)

@@ -6,7 +6,8 @@ no_vocals.flac (= sum of the non-vocal stems) for older callers. This module:
 
   * instrumental(tag, shaper, carve_mask)  rebuilds the beat stem by stem:
         drums  -> the caller's transient shaper (punch on the kick only)
-        bass   -> low end folded to mono (tight, mono-safe 808)
+        bass   -> dry_bass: centred, tail tightened, steady, out of the kick's way
+                  (BREKEM_DRY_BASS=0 -> only the low end folded to mono)
         rest   -> optional vocal-keyed dip at 1.8-5 kHz so the vocal sits in front
     falls back to shaper(no_vocals) for old 2-stem caches.
   * vocal_activity(voc, inst)  0..1 mask of where the vocal stem holds a real vocal.
@@ -128,6 +129,67 @@ def mono_low(x, f=120.0):
     return np.stack([mid + side, mid - side], 1)
 
 
+def kick_env(drums):
+    """0..1 envelope of the kick (drums below 120 Hz, 10 ms)."""
+    k = sig.sosfilt(sig.butter(4, 120 / (SR / 2), output="sos"), drums.mean(1))
+    w = int(0.01 * SR)
+    e = np.sqrt(np.convolve(k ** 2, np.ones(w) / w, mode="same"))
+    return np.clip(e / (np.percentile(e, 99) + 1e-9), 0, 1)
+
+
+def dry_bass(x, kick=None, tail_db=-8.0, width_hi=0.4):
+    """bass/808 centred and dry:
+      1. centred - everything under 250 Hz folded to mono, the side above kept at
+         width_hi (a bit of harmonic width, never in the sub)
+      2. no rumble under 28 Hz
+      3. dry - a decay expander: when a note's level falls 8+ dB under its own recent
+         peak (the tail, the room, the reverb), it is pulled down by up to tail_db,
+         so each note stops cleanly instead of ringing into the next
+      4. steady - ~4:1 compression on the loud part so every note hits the same
+      5. out of the kick's way - ducks up to 2 dB on each kick hit (if drums given)"""
+    mid = (x[:, 0] + x[:, 1]) * 0.5
+    side = (x[:, 0] - x[:, 1]) * 0.5
+    side = sig.sosfiltfilt(sig.butter(2, 250.0 / (SR / 2), btype="high", output="sos"), side) * width_hi
+    y = np.stack([mid + side, mid - side], 1)
+    y = sig.sosfiltfilt(sig.butter(2, 28.0 / (SR / 2), btype="high", output="sos"), y, axis=0)
+    m = np.abs(y).mean(1)
+    a5 = np.exp(-1.0 / (0.005 * SR))
+    env = np.sqrt(sig.lfilter([1 - a5], [1, -a5], m ** 2) + 1e-12)
+    edb = 20 * np.log10(env + 1e-9)
+    # recent peak: instant rise, ~0.35 s fall (block-wise to keep it fast)
+    hop = int(0.005 * SR); nb = len(edb) // hop
+    blk = edb[:nb * hop].reshape(nb, hop).max(1)
+    pk = np.empty(nb); cur = -200.0; fall = 0.005 / 0.35 * 20.0
+    for i, v in enumerate(blk):
+        cur = v if v > cur else cur - fall
+        pk[i] = cur
+    under = pk - blk                                   # dB under the note's peak
+    g = np.clip((under - 8.0) / 12.0, 0.0, 1.0) * tail_db
+    floor = np.percentile(blk, 99) - 60.0              # don't expand true silence twice
+    g[blk < floor] = tail_db
+    g = sig.sosfiltfilt(sig.butter(1, 12.0 / (1.0 / 0.005 / 2), output="sos"), g)
+    gain_db = np.interp(np.arange(len(edb)), np.arange(nb) * hop + hop // 2, g)
+    thr = np.percentile(edb, 80)
+    comp = -np.maximum(edb - thr, 0.0) * (1 - 1 / 4.0)
+    ac, rc = np.exp(-1.0 / (0.02 * SR)), np.exp(-1.0 / (0.12 * SR))
+    cs = np.zeros_like(comp); prev = 0.0
+    for i in range(0, len(comp), hop):                 # attack/release on 5 ms blocks
+        v = comp[i]; c = ac if v < prev else rc
+        prev = c ** hop * prev + (1 - c ** hop) * v; cs[i:i + hop] = prev
+    act = edb > thr - 20                               # makeup: keep the bass as loud as it was
+    gain_db = gain_db + cs - (np.median(cs[act]) if np.any(act) else 0.0)
+    if kick is not None:
+        gain_db = gain_db + _fit(kick[:, None], len(y))[:, 0] * -2.0
+    y = y * (10 ** (gain_db / 20.0))[:, None]
+    ra = np.sqrt(np.mean(x[act] ** 2)) if np.any(act) else 0.0     # same level on the notes as before
+    rb = np.sqrt(np.mean(y[act] ** 2)) if np.any(act) else 0.0
+    return y * (ra / rb) if rb > 0 else y
+
+
+def dry_enabled():
+    return os.environ.get("BREKEM_DRY_BASS", "1") != "0"
+
+
 def carve(x, mask, lo=1800.0, hi=5000.0, depth_db=-2.0):
     """make room for the vocal: dip the vocal-presence band of the beat by up to
     depth_db while the vocal is active (mask 1), untouched when it is not."""
@@ -146,10 +208,83 @@ def instrumental(tag, shaper, carve_mask=None, log=print):
     parts = {k: load(p) for k, p in stems.items()}
     n = min(len(v) for v in parts.values())
     parts = {k: v[:n] for k, v in parts.items()}
-    out = shaper(parts.pop("drums"))
+    drums = parts.pop("drums")
+    out = shaper(drums)
     if "bass" in parts:
-        out = out + mono_low(parts.pop("bass"))
+        b = parts.pop("bass")
+        out = out + (dry_bass(b, kick_env(drums)) if dry_enabled() else mono_low(b))
     for v in parts.values():
         out = out + carve(v, carve_mask)
     log(f"beat rebuilt from {len(stems)} stems: {', '.join(stems)}")
     return out
+
+
+# ------------------------------------------------------------------ guard
+BANDS = (("sub/bass", 120.0), ("low-mid", 500.0), ("mid", 2000.0), ("high-mid", 6000.0), ("high", None))
+
+
+def split_bands(x):
+    """5 bands that add back up to x EXACTLY (zero-phase low-passes, telescoped)."""
+    out, prev = [], np.zeros_like(x)
+    for _, f in BANDS:
+        lp = x if f is None else sig.sosfiltfilt(sig.butter(4, f / (SR / 2), output="sos"), x, axis=0)
+        out.append(lp - prev); prev = lp
+    return out
+
+
+def _band_env_db(b, ms=10.0):
+    k = max(1, int(ms / 1000 * SR))
+    e = np.sqrt(np.convolve(np.mean(b ** 2, axis=1), np.ones(k) / k, mode="same") + 1e-12)
+    return 20 * np.log10(e + 1e-9)
+
+
+def guard_ref(ref):
+    """analyse the original once (band shares + 10 ms peak ceilings), reuse for many guards."""
+    br = split_bands(ref)
+    tr = sum(np.mean(b ** 2) for b in br) + 1e-20
+    return dict(rms=float(np.sqrt(np.mean(ref ** 2))), n=len(ref),
+                share=[np.mean(b ** 2) / tr for b in br],
+                ceil=[float(np.percentile(_band_env_db(b), 99.5)) for b in br])
+
+
+def guard(y, ref, tone_tol_db=2.0, peak_tol_db=1.5, log=None):
+    """keep every band of y inside the song's own parameters (ref = the original, or
+    guard_ref(original)):
+      tone  - each band's share of the total may move at most tone_tol_db from ref's;
+              if a style pushed it further, a static gain brings it back to the edge
+      peaks - each band's 10 ms peaks may exceed ref's (at matched loudness) by at
+              most peak_tol_db; overs are pulled down by a smooth per-band limiter,
+              so one band (an 808 boom, an 'S', a hi-hat) can't slam the final limiter
+              and distort everything else."""
+    R = ref if isinstance(ref, dict) else guard_ref(ref)
+    ry = float(np.sqrt(np.mean(y ** 2)))
+    if ry <= 0 or R["rms"] <= 0:
+        return y
+    lift = 20 * np.log10(ry / R["rms"])                 # compare at matched loudness
+    by = split_bands(y)
+    ty = sum(np.mean(b ** 2) for b in by) + 1e-20
+    out, notes = [], []
+    for (nm, _), b, sh, cl in zip(BANDS, by, R["share"], R["ceil"]):
+        d = 10 * np.log10((np.mean(b ** 2) / ty + 1e-20) / (sh + 1e-20))
+        g = 0.0
+        if abs(d) > tone_tol_db:
+            g = -(abs(d) - tone_tol_db) * np.sign(d)
+            b = b * 10 ** (g / 20)
+        over = np.maximum(_band_env_db(b) - (cl + lift + peak_tol_db), 0.0)
+        red = 0.0
+        if np.any(over > 0):
+            # look-around hold (starts before the peak) + ~25 Hz zero-phase smoothing,
+            # never less than the over itself -> smooth, and the ceiling still holds
+            gr = maximum_filter1d(over, size=int(0.012 * SR))
+            gr = np.maximum(sig.sosfiltfilt(sig.butter(2, 25.0 / (SR / 2), output="sos"), gr), over)
+            b = b * (10 ** (-gr / 20))[:, None]; red = float(gr.max())
+        if g or red > 0.05:
+            notes.append(f"{nm} {g:+.1f} dB" + (f", peaks -{red:.1f}" if red > 0.05 else ""))
+        out.append(b)
+    if log:
+        log("guard: " + ("; ".join(notes) if notes else "all bands inside the song's range"))
+    return sum(out)
+
+
+def guard_enabled():
+    return os.environ.get("BREKEM_GUARD", "1") != "0"
