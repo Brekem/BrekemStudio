@@ -54,15 +54,31 @@ jobs:
       - name: Freeze (PyInstaller)
         run: pyinstaller build/brekem.spec --noconfirm
 
-      - name: Smoke test - master a 20 s clip with the frozen app
-        timeout-minutes: 30
+      - name: Smoke test - master a 20 s clip with the frozen app, OFFLINE
+        timeout-minutes: 40
+        env:
+          # the product is 100% offline: any download attempt goes to a dead proxy and fails
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+          ALL_PROXY: http://127.0.0.1:9
+          NO_PROXY: ""
         run: |
           $exe = "dist\BrekemStudio\BrekemStudioCLI.exe"
           vendor\ffmpeg.exe -v error -y -f lavfi -i "sine=f=110:d=20" -f lavfi -i "sine=f=330:d=20" `
             -f lavfi -i "anoisesrc=d=20:a=0.03:c=pink" -filter_complex "amix=inputs=3,volume=2,aformat=channel_layouts=stereo" `
             -ar 44100 smoke.wav
-          & $exe cli master smoke.wav smoke_out --fast --sep htdemucs --styles cd,signature
+          & $exe cli master smoke.wav smoke_out --fast --styles cd,signature      # default model: htdemucs_ft
           Write-Host "exit code: $LASTEXITCODE"
+          $meta = "$env:LOCALAPPDATA\BrekemStudio\stems\smoke\stems.json"
+          $used = Get-Content $meta | ConvertFrom-Json
+          if ($used.used -ne "htdemucs_ft") { throw "default separation fell back to $($used.used) - htdemucs_ft not bundled?" }
+          & $exe cli distribute smoke.wav smoke6 --sep htdemucs_6s --no-split --styles cd   # 6 stems, offline
+          $used = Get-Content $meta | ConvertFrom-Json
+          if ($used.used -ne "htdemucs_6s" -or -not ($used.stems -contains "guitar")) {
+            throw "6-stem separation offline failed: $($used | ConvertTo-Json -Compress)"
+          }
+          if (-not (Test-Path "smoke6\VARIANTS\01 CD MASTER.wav")) { throw "distribute + style failed" }
+          Remove-Item -Recurse -Force smoke6
           $need = "smoke_out\MASTER.wav", "smoke_out\ACAPELLA.wav", "smoke_out\INSTRUMENTAL.wav",
                   "smoke_out\VARIANTS\01 CD MASTER.wav", "smoke_out\VARIANTS\08 BREKEM SIGNATURE.wav",
                   "smoke_out\VARIANTS\COMPARE.html"
