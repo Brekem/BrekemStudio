@@ -1,8 +1,8 @@
 ## BREKEM STUDIO 2.0
 
-Descarga **BREKEM STUDIO 2.0.0 Setup.exe**, ábrelo e instala. Funciona sin internet: los
-modelos de IA (Demucs `htdemucs_ft` y `htdemucs`, DeepFilterNet3) y FFmpeg vienen incluidos.
-La opción de 6 stems descarga su modelo (~80 MB) la primera vez que se usa.
+Descarga **BREKEM STUDIO 2.0.0 Setup.exe**, ábrelo e instala. Todo viene dentro del
+instalador y funciona sin internet: Python y todas las librerías, FFmpeg, y todos los
+modelos de IA (Demucs `htdemucs_ft`, `htdemucs_6s` y `htdemucs`, DeepFilterNet3).
 
 ### Novedades
 - **Separación en todos los stems**: voz, batería, bajo y otros (o 6 stems con guitarra y

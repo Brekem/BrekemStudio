@@ -1,10 +1,11 @@
 """Download the AI model weights into <project>/models so the build ships fully offline.
 Run with the build venv's python, from the project root:  python build\\fetch_models.py
-  models/torch/hub/checkpoints/*.th   Demucs: htdemucs (fast + fallback), htdemucs_ft (default)
+  models/torch/hub/checkpoints/*.th   Demucs: htdemucs_ft (default), htdemucs_6s (6 stems),
+                                      htdemucs (fast + fallback)
   models/dfn/DeepFilterNet3/          DeepFilterNet3 (vocal denoise)
 The frozen app bundles this folder and seeds it into %LOCALAPPDATA%\\BrekemStudio\\models
-on first launch (brekem_env._seed_models). htdemucs_6s is left out to keep the installer
-small; it downloads the first time someone picks the 6-stem option.
+on first launch (brekem_env._seed_models). Every model the app can use is here: the
+installed app never needs the internet.
 """
 import io, os, sys, zipfile, urllib.request
 
@@ -13,7 +14,7 @@ MODELS = os.path.join(ROOT, "models")
 os.environ["TORCH_HOME"] = os.path.join(MODELS, "torch")
 
 from demucs.pretrained import get_model
-for name in ("htdemucs", "htdemucs_ft"):
+for name in ("htdemucs", "htdemucs_ft", "htdemucs_6s"):
     print("demucs", name, "->", get_model(name).__class__.__name__, flush=True)
 
 dfn = os.path.join(MODELS, "dfn")
