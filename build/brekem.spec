@@ -35,6 +35,8 @@ except Exception as e:
 for sub in ("engine", "vendor", "refs", "models"):
     p = os.path.join(ROOT, sub)
     for dirpath, _, files in os.walk(p):
+        if sub == "models" and "blobs" in dirpath.replace("\\", "/").split("/"):
+            continue   # Hugging Face cache: snapshots/ already resolve to these files (no 2x size)
         for fn in files:
             full = os.path.join(dirpath, fn)
             rel = os.path.relpath(dirpath, ROOT)

@@ -91,7 +91,11 @@ def apply_env():
     os.environ["TORCH_HOME"] = os.path.join(MODELS, "torch")
     os.environ.setdefault("DEMUCS_MODELS", os.path.join(MODELS, "demucs"))
     os.environ.setdefault("XDG_CACHE_HOME", os.path.join(MODELS, "cache"))
-    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    # Demucs >= 4.1 loads its models from the Hugging Face hub cache: point it at the
+    # bundled copy and never go online (the product is 100% offline)
+    os.environ["HF_HOME"] = os.path.join(MODELS, "hf")
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
     # bundled ffmpeg first on PATH so bare "ffmpeg"/"ffprobe" resolve to ours
     if os.path.isdir(VENDOR):
         os.environ["PATH"] = VENDOR + os.pathsep + os.environ.get("PATH", "")

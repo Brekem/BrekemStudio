@@ -1,7 +1,10 @@
 """Download the AI model weights into <project>/models so the build ships fully offline.
 Run with the build venv's python, from the project root:  python build\\fetch_models.py
-  models/torch/hub/checkpoints/*.th   Demucs: htdemucs_ft (default), htdemucs_6s (6 stems),
-                                      htdemucs (fast + fallback)
+  models/hf/                          Demucs: htdemucs_ft (default), htdemucs_6s (6 stems),
+                                      htdemucs (fast + fallback). Demucs >= 4.1 loads its
+                                      models from the Hugging Face hub, so they live in a
+                                      Hugging Face cache (HF_HOME); legacy torch.hub files
+                                      (if any) land in models/torch.
   models/dfn/DeepFilterNet3/          DeepFilterNet3 (vocal denoise)
 The frozen app bundles this folder and seeds it into %LOCALAPPDATA%\\BrekemStudio\\models
 on first launch (brekem_env._seed_models). Every model the app can use is here: the
@@ -12,6 +15,8 @@ import io, os, sys, zipfile, urllib.request
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODELS = os.path.join(ROOT, "models")
 os.environ["TORCH_HOME"] = os.path.join(MODELS, "torch")
+os.environ["HF_HOME"] = os.path.join(MODELS, "hf")          # same paths brekem_env.apply_env uses
+os.environ.pop("HF_HUB_OFFLINE", None)
 
 from demucs.pretrained import get_model
 for name in ("htdemucs", "htdemucs_ft", "htdemucs_6s"):
@@ -33,3 +38,5 @@ for d, _, fs in os.walk(MODELS):
         p = os.path.join(d, f); tot += os.path.getsize(p)
         print(f"  {os.path.relpath(p, MODELS)}  {os.path.getsize(p) // (1 << 20)} MB")
 print(f"models total {tot / (1 << 20):.0f} MB")
+if tot < 300 * (1 << 20):     # htdemucs_ft alone is ~4 x 80 MB: something went to another cache
+    sys.exit("model weights missing from models/ - the installer would not be offline")
