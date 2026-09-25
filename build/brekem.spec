@@ -88,7 +88,15 @@ exe = EXE(
     disable_windowed_traceback=False,
     icon=os.path.join(ROOT, "icons", "brekem.ico") if os.path.exists(os.path.join(ROOT, "icons", "brekem.ico")) else None,
 )
+# same program as a console app: the GUI runs the engines through it (real stdout),
+# and it is the command-line entry point:  BrekemStudioCLI.exe cli master "<song>" "<out>"
+exe_cli = EXE(
+    pyz, a.scripts, [],
+    exclude_binaries=True,
+    name="BrekemStudioCLI",
+    console=True,
+)
 coll = COLLECT(
-    exe, a.binaries, a.zipfiles, a.datas,
+    exe, exe_cli, a.binaries, a.zipfiles, a.datas,
     strip=False, upx=False, name="BrekemStudio",
 )

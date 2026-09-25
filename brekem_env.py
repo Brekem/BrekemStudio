@@ -110,10 +110,13 @@ def run_engine(script, args, on_line=None, cwd=None):
     Returns exit code. Works from source (child python) and frozen (multi-call exe)."""
     apply_env()
     spath = os.path.join(ENGINE, script)
-    if FROZEN:
-        cmd = [sys.executable, spath] + [str(a) for a in args]
-    else:
-        cmd = [sys.executable, spath] + [str(a) for a in args]
+    exe = sys.executable
+    if FROZEN:   # the console twin has a real stdout for the engine's output and progress bars
+        cli = os.path.join(os.path.dirname(sys.executable), "BrekemStudioCLI.exe")
+        if os.path.exists(cli):
+            exe = cli
+            os.environ["BREKEM_PY"] = cli    # engines spawn demucs etc. through it too
+    cmd = [exe, spath] + [str(a) for a in args]
     env = dict(os.environ)
     creat = 0
     if os.name == "nt":

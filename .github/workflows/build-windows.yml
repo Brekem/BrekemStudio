@@ -52,14 +52,14 @@ jobs:
         run: pyinstaller build/brekem.spec --noconfirm
 
       - name: Smoke test - master a 20 s clip with the frozen app
+        timeout-minutes: 30
         run: |
-          $exe = "dist\BrekemStudio\BrekemStudio.exe"
+          $exe = "dist\BrekemStudio\BrekemStudioCLI.exe"
           vendor\ffmpeg.exe -v error -y -f lavfi -i "sine=f=110:d=20" -f lavfi -i "sine=f=330:d=20" `
             -f lavfi -i "anoisesrc=d=20:a=0.03:c=pink" -filter_complex "amix=inputs=3,volume=2,aformat=channel_layouts=stereo" `
             -ar 44100 smoke.wav
-          $p = Start-Process -FilePath $exe -ArgumentList 'cli master smoke.wav smoke_out --fast --sep htdemucs --styles cd,signature' `
-            -Wait -PassThru -NoNewWindow
-          Write-Host "exit code: $($p.ExitCode)"
+          & $exe cli master smoke.wav smoke_out --fast --sep htdemucs --styles cd,signature
+          Write-Host "exit code: $LASTEXITCODE"
           $need = "smoke_out\MASTER.wav", "smoke_out\ACAPELLA.wav", "smoke_out\INSTRUMENTAL.wav",
                   "smoke_out\VARIANTS\01 CD MASTER.wav", "smoke_out\VARIANTS\08 BREKEM SIGNATURE.wav",
                   "smoke_out\VARIANTS\COMPARE.html"
