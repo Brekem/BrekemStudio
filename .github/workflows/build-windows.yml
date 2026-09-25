@@ -38,11 +38,12 @@ jobs:
 
       - name: FFmpeg (gyan.dev full build, GPL - has the soxr resampler)
         run: |
-          Invoke-WebRequest https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full.zip -OutFile ff.zip
-          Expand-Archive ff.zip -DestinationPath ffx
+          Invoke-WebRequest https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full.7z -OutFile ff.7z
+          & 7z x ff.7z -offx -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "7z extract failed" }
           New-Item -ItemType Directory -Force vendor | Out-Null
           Get-ChildItem ffx -Recurse -Include ffmpeg.exe, ffprobe.exe | Copy-Item -Destination vendor
-          Remove-Item -Recurse -Force ffx, ff.zip
+          Remove-Item -Recurse -Force ffx, ff.7z
           vendor\ffmpeg.exe -hide_banner -version | Select-Object -First 1
           vendor\ffmpeg.exe -v error -f lavfi -i "sine=d=0.2" -af "aresample=192000:resampler=soxr:precision=28,alimiter=level=0:latency=1" -f null -
           if ($LASTEXITCODE -ne 0) { throw "this ffmpeg lacks soxr or alimiter latency" }
