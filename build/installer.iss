@@ -2,7 +2,7 @@
 ; Build:  ISCC.exe build\installer.iss   (run from project root, after PyInstaller)
 
 #define AppName "BREKEM STUDIO"
-#define AppVer  "1.0.0"
+#define AppVer  "2.0.0"
 #define AppExe  "BrekemStudio.exe"
 ; project root = folder above this .iss
 #define Root AddBackslash(SourcePath) + ".."
@@ -15,7 +15,7 @@ DefaultDirName={autopf}\BREKEM STUDIO
 DefaultGroupName=BREKEM STUDIO
 DisableProgramGroupPage=yes
 OutputDir={#Root}\dist
-OutputBaseFilename=BREKEM STUDIO Setup
+OutputBaseFilename=BREKEM STUDIO {#AppVer} Setup
 Compression=lzma2/max
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible

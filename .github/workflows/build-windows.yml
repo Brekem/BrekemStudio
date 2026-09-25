@@ -1,0 +1,100 @@
+name: Build Windows installer
+
+# push a tag vX.Y.Z -> build, smoke-test the frozen app, publish a GitHub Release
+# manual run (Actions tab -> Run workflow) -> build + test, installer as a workflow artifact
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 240
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: FFmpeg (gyan.dev essentials build, GPL)
+        run: |
+          Invoke-WebRequest https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip -OutFile ff.zip
+          Expand-Archive ff.zip -DestinationPath ffx
+          New-Item -ItemType Directory -Force vendor | Out-Null
+          Get-ChildItem ffx -Recurse -Include ffmpeg.exe, ffprobe.exe | Copy-Item -Destination vendor
+          Remove-Item -Recurse -Force ffx, ff.zip
+          vendor\ffmpeg.exe -hide_banner -version | Select-Object -First 1
+
+      - name: AI model weights (bundled -> works offline)
+        run: python build/fetch_models.py
+
+      - name: Freeze (PyInstaller)
+        run: pyinstaller build/brekem.spec --noconfirm
+
+      - name: Smoke test - master a 20 s clip with the frozen app
+        run: |
+          $exe = "dist\BrekemStudio\BrekemStudio.exe"
+          vendor\ffmpeg.exe -v error -y -f lavfi -i "sine=f=110:d=20" -f lavfi -i "sine=f=330:d=20" `
+            -f lavfi -i "anoisesrc=d=20:a=0.03:c=pink" -filter_complex "amix=inputs=3,volume=2,aformat=channel_layouts=stereo" `
+            -ar 44100 smoke.wav
+          $p = Start-Process -FilePath $exe -ArgumentList 'cli master smoke.wav smoke_out --fast --sep htdemucs --styles cd,signature' `
+            -Wait -PassThru -NoNewWindow
+          Write-Host "exit code: $($p.ExitCode)"
+          $need = "smoke_out\MASTER.wav", "smoke_out\ACAPELLA.wav", "smoke_out\INSTRUMENTAL.wav",
+                  "smoke_out\VARIANTS\01 CD MASTER.wav", "smoke_out\VARIANTS\08 BREKEM SIGNATURE.wav",
+                  "smoke_out\VARIANTS\COMPARE.html"
+          $miss = $need | Where-Object { -not (Test-Path $_) }
+          Get-ChildItem -Recurse smoke_out | Select-Object FullName, Length | Format-Table -AutoSize
+          if ($miss) {
+            Get-ChildItem "$env:LOCALAPPDATA\BrekemStudio" -Recurse -Filter *.log | ForEach-Object { Write-Host "== $_"; Get-Content $_ -Tail 60 }
+            throw "frozen app did not produce: $($miss -join ', ')"
+          }
+          Remove-Item -Recurse -Force smoke_out, smoke.wav
+
+      - name: Installer (Inno Setup)
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          & $iscc build\installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+          Get-ChildItem dist\*.exe | Select-Object Name, @{n="MB";e={[int]($_.Length/1MB)}}
+
+      - name: Split if over the 2 GB release-asset limit
+        run: |
+          $f = Get-ChildItem "dist\BREKEM STUDIO *Setup.exe" | Select-Object -First 1
+          New-Item -ItemType Directory -Force release | Out-Null
+          if ($f.Length -lt 1.95GB) {
+            Copy-Item $f.FullName release\
+          } else {
+            & 7z a -v1900m "release\$($f.BaseName).7z" $f.FullName
+          }
+          Get-ChildItem release | Select-Object Name, @{n="MB";e={[int]($_.Length/1MB)}}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brekem-studio-windows
+          path: release/*
+          retention-days: 14
+
+      - name: GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $files = Get-ChildItem release | ForEach-Object { $_.FullName }
+          gh release create "${{ github.ref_name }}" $files --repo "${{ github.repository }}" `
+            --title "BREKEM STUDIO ${{ github.ref_name }}" --notes-file build/RELEASE_NOTES.md

@@ -405,8 +405,8 @@ class App(ttk.Frame):
 def main():
     E.apply_env()
     root = tk.Tk()
-    root.title(APP)
-    root.geometry("860x660")
+    root.title(f"{APP} {E.VERSION}")
+    root.geometry("1000x860")
     try:
         root.call("ttk::style", "theme", "use", "clam")
     except Exception:

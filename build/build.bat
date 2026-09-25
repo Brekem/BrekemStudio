@@ -28,7 +28,7 @@ if defined ISCC (
   echo.
   echo ==== Inno Setup ====
   "%ISCC%" build\installer.iss || exit /b 1
-  echo Installer: dist\BREKEM STUDIO Setup.exe
+  echo Installer: dist\BREKEM STUDIO 2.0.0 Setup.exe
 ) else (
   echo Inno Setup not found - skipping installer. Zip dist\BrekemStudio\ instead,
   echo or: winget install JRSoftware.InnoSetup  then re-run this script.
