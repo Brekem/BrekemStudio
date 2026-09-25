@@ -363,7 +363,11 @@ def _ebur(path):
     return g("I", "LUFS"), g("LRA", "LU"), g("Peak", "dBFS")
 
 
-_LAT = [":latency=1"]   # alimiter delay compensation (ffmpeg >= 5.1); dropped if unsupported
+# ffmpeg feature fallbacks, best first: alimiter delay compensation (ffmpeg >= 5.1) and the
+# soxr resampler (not in every ffmpeg build). The first combination that works is kept.
+_MODES = [(":latency=1", ":resampler=soxr:precision=28"), ("", ":resampler=soxr:precision=28"),
+          (":latency=1", ""), ("", "")]
+_MODE = [0]
 
 
 def _limit(src, dst, gain_db, tp):
@@ -371,19 +375,19 @@ def _limit(src, dst, gain_db, tp):
     limiter a hair under the target true-peak. No AGC anywhere."""
     import subprocess
     cf = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    while True:
-        lat = _LAT[0]
-        af = (f"volume={gain_db:.2f}dB,aresample=192000:resampler=soxr:precision=28,"
+    while _MODE[0] < len(_MODES):
+        lat, rs = _MODES[_MODE[0]]
+        af = (f"volume={gain_db:.2f}dB,aresample=192000{rs},"
               f"alimiter=limit={10 ** ((tp - 0.5) / 20.0):.4f}:level=0:asc=1{lat},"
-              f"aresample=48000:resampler=soxr:precision=28,"
+              f"aresample=48000{rs},"
               f"alimiter=limit={10 ** ((tp - 0.3) / 20.0):.4f}:level=0{lat}")
         r = subprocess.run([E.FFMPEG, "-v", "error", "-y", "-i", src, "-af", af,
                             "-ar", "48000", "-c:a", "pcm_s24le", dst], creationflags=cf)
-        if r.returncode == 0 and os.path.exists(dst):
+        if r.returncode == 0 and os.path.exists(dst) and os.path.getsize(dst) > 44:
             return True
-        if not lat:
-            return False
-        _LAT[0] = ""
+        _MODE[0] += 1
+    _MODE[0] = len(_MODES) - 1
+    return False
 
 
 def _fade_tail(path, ms=15.0):
@@ -422,7 +426,7 @@ def _regulate(src, dst_dir, kind, target_lufs, tp, log):
         gain += target_lufs - i1
     _fade_tail(w48)
     subprocess.run([E.FFMPEG, "-v", "error", "-y", "-i", w48,
-                    "-af", "aresample=44100:resampler=soxr:precision=28:dither_method=triangular_hp",
+                    "-af", f"aresample=44100{_MODES[_MODE[0]][1]}:dither_method=triangular_hp",
                     "-c:a", "pcm_s16le", w44], creationflags=cf)
     subprocess.run([E.FFMPEG, "-v", "error", "-y", "-i", w48,
                     "-c:a", "libmp3lame", "-b:a", "320k", "-id3v2_version", "3", mp3],

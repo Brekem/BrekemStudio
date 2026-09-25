@@ -156,19 +156,26 @@ _PLATE = Pedalboard([
 def eq_sub(x):   return _EQ(x.astype(np.float32), SR).astype(np.float64)
 def plate(x):    return _PLATE(x.astype(np.float32), SR).astype(np.float64)
 
-_LAT=[":latency=1"]   # alimiter delay compensation (ffmpeg >= 5.1); dropped if the ffmpeg is older
+# ffmpeg feature fallbacks, best first: alimiter delay compensation (ffmpeg >= 5.1) and the
+# soxr resampler (not in every ffmpeg build). The first combination that works is kept.
+_MODES=[(":latency=1",":resampler=soxr:precision=28"),("",":resampler=soxr:precision=28"),
+        (":latency=1",""),("","")]
+_MODE=[0]
 def _limit(src, out, gain_db, drive, tp_lin):
     """static gain -> 4x-oversampled lookahead limiter -> 48k limiter. Gain is a single
     number for the whole song: no AGC, so nothing can ride the level up and down."""
-    while True:
-        lat=_LAT[0]
-        af=(f"volume={gain_db:.2f}dB,aresample=192000:resampler=soxr:precision=28,"
-            f"alimiter=limit={drive}:level=0:asc=1{lat},aresample=48000:resampler=soxr:precision=28,"
+    err=""
+    while _MODE[0]<len(_MODES):
+        lat,rs=_MODES[_MODE[0]]
+        af=(f"volume={gain_db:.2f}dB,aresample=192000{rs},"
+            f"alimiter=limit={drive}:level=0:asc=1{lat},aresample=48000{rs},"
             f"alimiter=limit={tp_lin}:level=0{lat}")
         r=run(["ffmpeg","-hide_banner","-y","-i",src,"-af",af,"-ar","48000","-c:a","pcm_s24le",out])
-        if r.returncode==0 and os.path.exists(out): return True
-        if not lat: return False
-        _LAT[0]=""
+        if r.returncode==0 and os.path.exists(out) and os.path.getsize(out)>44: return True
+        err=r.stderr[-400:]; _MODE[0]+=1
+    _MODE[0]=len(_MODES)-1
+    print("ffmpeg limiter failed:", err, flush=True)
+    return False
 def fade_tail(path, ms=15.0):
     """a song that stops on a non-zero sample clicks; fade the last few ms to zero."""
     try:
