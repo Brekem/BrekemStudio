@@ -1,0 +1,133 @@
+name: Build Windows installer
+
+# Builds, smoke-tests the frozen app and publishes the release "v<brekem_env.VERSION>" when:
+#   - a tag v* is pushed, or
+#   - a commit whose message contains [release] is pushed to a watched branch
+# A manual run (Actions tab -> Run workflow) builds + tests, installer as a workflow artifact.
+on:
+  push:
+    tags: ["v*"]
+    branches: [main, windows, "claude/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: >-
+      github.event_name != 'push' || startsWith(github.ref, 'refs/tags/') ||
+      contains(github.event.head_commit.message, '[release]')
+    runs-on: windows-latest
+    timeout-minutes: 240
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: FFmpeg (gyan.dev full build, GPL - has the soxr resampler)
+        run: |
+          Invoke-WebRequest https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full.7z -OutFile ff.7z
+          & 7z x ff.7z -offx -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "7z extract failed" }
+          New-Item -ItemType Directory -Force vendor | Out-Null
+          Get-ChildItem ffx -Recurse -Include ffmpeg.exe, ffprobe.exe | Copy-Item -Destination vendor
+          Remove-Item -Recurse -Force ffx, ff.7z
+          vendor\ffmpeg.exe -hide_banner -version | Select-Object -First 1
+          vendor\ffmpeg.exe -v error -f lavfi -i "sine=d=0.2" -af "aresample=192000:resampler=soxr:precision=28,alimiter=level=0:latency=1" -f null -
+          if ($LASTEXITCODE -ne 0) { throw "this ffmpeg lacks soxr or alimiter latency" }
+
+      - name: AI model weights (bundled -> works offline)
+        run: python build/fetch_models.py
+
+      - name: Freeze (PyInstaller)
+        run: pyinstaller build/brekem.spec --noconfirm
+
+      - name: Smoke test - master a 20 s clip with the frozen app, OFFLINE
+        timeout-minutes: 40
+        env:
+          # the product is 100% offline: any download attempt goes to a dead proxy and fails
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+          ALL_PROXY: http://127.0.0.1:9
+          NO_PROXY: ""
+        run: |
+          $exe = "dist\BrekemStudio\BrekemStudioCLI.exe"
+          vendor\ffmpeg.exe -v error -y -f lavfi -i "sine=f=110:d=20" -f lavfi -i "sine=f=330:d=20" `
+            -f lavfi -i "anoisesrc=d=20:a=0.03:c=pink" -filter_complex "amix=inputs=3,volume=2,aformat=channel_layouts=stereo" `
+            -ar 44100 smoke.wav
+          & $exe cli master smoke.wav smoke_out --fast --styles cd,signature      # default model: htdemucs_ft
+          Write-Host "exit code: $LASTEXITCODE"
+          $meta = "$env:LOCALAPPDATA\BrekemStudio\stems\smoke\stems.json"
+          $used = Get-Content $meta | ConvertFrom-Json
+          if ($used.used -ne "htdemucs_ft") { throw "default separation fell back to $($used.used) - htdemucs_ft not bundled?" }
+          & $exe cli distribute smoke.wav smoke6 --sep htdemucs_6s --no-split --styles cd   # 6 stems, offline
+          $used = Get-Content $meta | ConvertFrom-Json
+          if ($used.used -ne "htdemucs_6s" -or -not ($used.stems -contains "guitar")) {
+            throw "6-stem separation offline failed: $($used | ConvertTo-Json -Compress)"
+          }
+          if (-not (Test-Path "smoke6\VARIANTS\01 CD MASTER.wav")) { throw "distribute + style failed" }
+          Remove-Item -Recurse -Force smoke6
+          $need = "smoke_out\MASTER.wav", "smoke_out\ACAPELLA.wav", "smoke_out\INSTRUMENTAL.wav",
+                  "smoke_out\VARIANTS\01 CD MASTER.wav", "smoke_out\VARIANTS\08 BREKEM SIGNATURE.wav",
+                  "smoke_out\VARIANTS\COMPARE.html"
+          $miss = $need | Where-Object { -not (Test-Path $_) }
+          Get-ChildItem -Recurse smoke_out | Select-Object FullName, Length | Format-Table -AutoSize
+          if ($miss) {
+            Get-ChildItem "$env:LOCALAPPDATA\BrekemStudio" -Recurse -Filter *.log | ForEach-Object { Write-Host "== $_"; Get-Content $_ -Tail 60 }
+            throw "frozen app did not produce: $($miss -join ', ')"
+          }
+          Remove-Item -Recurse -Force smoke_out, smoke.wav
+
+      - name: Installer (Inno Setup)
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          & $iscc build\installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+          Get-ChildItem dist\*.exe | Select-Object Name, @{n="MB";e={[int]($_.Length/1MB)}}
+
+      - name: Split if over the 2 GB release-asset limit
+        run: |
+          $f = Get-ChildItem "dist\BREKEM STUDIO *Setup.exe" | Select-Object -First 1
+          New-Item -ItemType Directory -Force release | Out-Null
+          if ($f.Length -lt 1.95GB) {
+            Copy-Item $f.FullName release\
+          } else {
+            & 7z a -v1900m "release\$($f.BaseName).7z" $f.FullName
+          }
+          Get-ChildItem release | Select-Object Name, @{n="MB";e={[int]($_.Length/1MB)}}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brekem-studio-windows
+          path: release/*
+          retention-days: 14
+
+      - name: GitHub Release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ver = (Select-String -Path brekem_env.py -Pattern 'VERSION = "(.+)"').Matches[0].Groups[1].Value
+          $tag = if ("${{ github.ref }}".StartsWith("refs/tags/")) { "${{ github.ref_name }}" } else { "v$ver" }
+          $files = Get-ChildItem release | ForEach-Object { $_.FullName }
+          gh release view $tag --repo "${{ github.repository }}" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $files --clobber --repo "${{ github.repository }}"
+          } else {
+            gh release create $tag $files --repo "${{ github.repository }}" --target "${{ github.sha }}" `
+              --title "BREKEM STUDIO $tag" --notes-file build/RELEASE_NOTES.md
+          }
+          if ($LASTEXITCODE -ne 0) { throw "release failed" }
