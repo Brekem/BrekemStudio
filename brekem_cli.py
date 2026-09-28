@@ -15,6 +15,7 @@ STYLE OPTS (every command): --styles cd,clarity,espacial,punch,warm,club,streami
   --tune         natural pitch correction: each sung note moved to the key, vibrato kept
   brekem_cli.py stemmix  "<stemdir>" "<voxfile>" "<outdir>" [--vox -3.0]
   brekem_cli.py distribute "<audio|folder>" "<outdir>" [--lufs -9.5] [--no-split] [--clean] [--sep MODEL]
+  brekem_cli.py styles "<audio|folder>" "<outdir>" --styles clarity,punch [--tune]   (only those, any audio)
 MODEL (stem separation): htdemucs_ft (default, 4 stems, best) | htdemucs_6s (6 stems) | htdemucs (fast)
 """
 import os, re, sys, glob, shutil, argparse
@@ -351,6 +352,37 @@ def stemmix(stemdir, voxfile, outdir, vox=-3.0, care=True, log=print, variants=N
     log(f"=> DONE mix  {bok}/6  tonal {_tonal(bd):.1f}  -> {outdir}")
 
 
+# ------------------------------------------------------------------ styles & tune only
+def styles_only(path, outdir, variants=None, tune=False, dry=True, guard=True, sep=None, log=print):
+    """Styles & Tune tab: any audio (file or folder) -> only the picked master styles
+    and/or the tuned version (TUNED MIX + ACAPELLA TUNED). No MASTER/INSTRUMENTAL/APPLE."""
+    E.apply_env()
+    _opts(dry, guard, tune)
+    ids = _style_list(variants)
+    if not ids and not tune:
+        log("!! Mark at least one style or the pitch correction."); return
+    if os.path.isdir(path):
+        files = sorted({p for e in AUDIO_EXT for p in glob.glob(os.path.join(path, "*" + e))})
+        if not files:
+            log("!! No audio in the folder."); return
+        jobs = [(f, os.path.join(outdir, f"{i:02d} - {os.path.splitext(os.path.basename(f))[0]}"))
+                for i, f in enumerate(files, 1)]
+    else:
+        jobs = [(path, outdir)]
+    for i, (f, od) in enumerate(jobs, 1):
+        log(f"\n=== [{i}/{len(jobs)}] {os.path.basename(f)}  "
+            f"({', '.join(ids) or 'no styles'}{' + pitch correction' if tune else ''})")
+        tag = _safe_tag(f)
+        if _prep(f, tag, sep, 1, log) != 0:
+            log("!! Separation failed."); continue
+        os.makedirs(od, exist_ok=True)
+        if tune:
+            E.run_engine("retune.py", [tag, os.path.abspath(od)], on_line=lambda s: log("  " + s))
+        if ids:
+            _variants(tag, od, log, ids)
+        log(f"=> DONE -> {od}")
+
+
 # ------------------------------------------------------------------ distribute
 def _ebur(path):
     import subprocess
@@ -530,7 +562,9 @@ def _cli():
         p.add_argument("--shifts", type=int, default=1)
     c = sub.add_parser("stemmix"); c.add_argument("stemdir"); c.add_argument("voxfile"); c.add_argument("outdir"); c.add_argument("--vox", type=float, default=-3.0)
     d = sub.add_parser("distribute"); d.add_argument("path"); d.add_argument("outdir")
-    for p in (a, b, c, d):
+    e = sub.add_parser("styles"); e.add_argument("path"); e.add_argument("outdir")
+    e.add_argument("--sep", choices=SEP_MODELS, default=SEP_DEFAULT)
+    for p in (a, b, c, d, e):
         p.add_argument("--styles", default="", help="comma list of " + ",".join(STYLE_IDS) + " or 'all'")
         p.add_argument("--no-dry-bass", action="store_true"); p.add_argument("--no-guard", action="store_true")
         p.add_argument("--tune", action="store_true", help="natural pitch correction of the vocal")
@@ -546,6 +580,8 @@ def _cli():
         batch(ns.folder, ns.outdir, care=not ns.fast, sep=ns.sep, shifts=ns.shifts, **kw)
     elif ns.cmd == "stemmix":
         stemmix(ns.stemdir, ns.voxfile, ns.outdir, vox=ns.vox, **kw)
+    elif ns.cmd == "styles":
+        styles_only(ns.path, ns.outdir, sep=ns.sep, **kw)
     elif ns.cmd == "distribute":
         sp = not ns.no_split
         fn = distribute_batch if os.path.isdir(ns.path) else distribute

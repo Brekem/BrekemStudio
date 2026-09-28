@@ -126,6 +126,11 @@ cached next to the stems. In **Mix from stems** it tunes your own vocal to the
 beat's key. In Distribute it needs AI Clean or a master style (it works on the
 separated vocal). CLI: `--tune`.
 
+**Styles & Tune tab (3.1)**: any audio (file or folder) in, *only* what you mark
+out: the master styles you tick and/or, with pitch correction ticked,
+`TUNED MIX.wav` (the song with the vocal in tune, nothing else changed) and
+`ACAPELLA TUNED.wav`. CLI: `brekem_cli.py styles "<audio|folder>" "<out>" --styles clarity,punch --tune`.
+
 ## Loudness
 
 All loudness targets are reached with one static gain + a 4x-oversampled

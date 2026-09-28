@@ -1,10 +1,16 @@
-## BREKEM STUDIO 3.0
+## BREKEM STUDIO 3.1
 
-Descarga **BREKEM STUDIO 3.0.0 Setup.exe**, ábrelo e instala. Todo viene dentro del
+Descarga **BREKEM STUDIO 3.1.0 Setup.exe**, ábrelo e instala. Todo viene dentro del
 instalador y funciona sin internet: Python y todas las librerías, FFmpeg, Praat y todos
 los modelos de IA (Demucs `htdemucs_ft`, `htdemucs_6s` y `htdemucs`, DeepFilterNet3).
 
-### Nuevo en 3.0: afinación natural (auto-tune sin robot)
+### Nuevo en 3.1: pestaña "Styles & Tune"
+- Cualquier audio (archivo o carpeta) → **solo** lo que marques con [X]: los estilos de
+  máster que quieras (Clarity, Punch, Espacial…) y/o la afinación natural.
+- Con la afinación marcada saca **TUNED MIX.wav** (la canción con la voz afinada, nada más
+  cambiado) y **ACAPELLA TUNED.wav**. Sin MASTER / INSTRUMENTAL / APPLE.
+
+### 3.0: afinación natural (auto-tune sin robot)
 - Marca **[X] Natural pitch correction** en Extras (en todas las pestañas).
 - Lee la **tonalidad del beat** y mueve **cada nota completa** a la nota correcta: el
   centro de la nota queda afinado y se conservan **tu vibrato, tus deslices y tus

@@ -69,6 +69,7 @@ class App(ttk.Frame):
         self.tab_stem(nb)
         self.tab_distrib(nb)
         self.tab_clean(nb)
+        self.tab_styles(nb)
         self.tab_refs(nb)
 
         self.con = Console(self)
@@ -321,6 +322,41 @@ class App(ttk.Frame):
             self._run_bg(lambda: C.distribute(i, o, target_lufs=lufs, split=sp, clean=clean, log=self.log,
                                               sep=sep, **kw),
                          needs_refs=False)
+
+    # ---------- tab: styles & tune only ----------
+    def tab_styles(self, nb):
+        f = ttk.Frame(nb, padding=PAD)
+        nb.add(f, text="Styles & Tune")
+        f.columnconfigure(1, weight=1)
+        self.y_in = tk.StringVar()
+        self.y_out = tk.StringVar()
+        ttk.Label(f, text="Audio or folder:").grid(row=0, column=0, sticky="w")
+        ttk.Entry(f, textvariable=self.y_in).grid(row=0, column=1, sticky="ew", padx=6)
+        bb = ttk.Frame(f); bb.grid(row=0, column=2)
+        ttk.Button(bb, text="File", width=7, command=lambda: self._pick_file(self.y_in)).pack()
+        ttk.Button(bb, text="Folder", width=7, command=lambda: self._pick_dir(self.y_in)).pack()
+        ttk.Label(f, text="Output folder:").grid(row=1, column=0, sticky="w", pady=6)
+        ttk.Entry(f, textvariable=self.y_out).grid(row=1, column=1, sticky="ew", padx=6)
+        ttk.Button(f, text="...", width=3, command=lambda: self._pick_dir(self.y_out)).grid(row=1, column=2)
+        self.y_sep = self._sep_row(f, 2)
+        ttk.Button(f, text="Make only these", command=self._go_styles).grid(
+            row=3, column=1, sticky="w", padx=6, pady=(10, 0))
+        ttk.Label(f, text="Any audio in, ONLY what you mark out: the master styles you tick (each as WAV + MP3,\n"
+                          "with COMPARE.html) and/or, with Natural pitch correction ticked, TUNED MIX.wav (the song with\n"
+                          "the vocal in tune, nothing else changed) + ACAPELLA TUNED.wav. No MASTER / INSTRUMENTAL / APPLE.",
+                  foreground="#7b8794").grid(row=4, column=0, columnspan=3, sticky="w", pady=(10, 0))
+        self.y_opts = self._opts_panel(f, 7)
+
+    def _go_styles(self):
+        i, o = self.y_in.get().strip(), self.y_out.get().strip()
+        if not (i and os.path.exists(i)):
+            messagebox.showwarning(APP, "Pick an audio file or a folder."); return
+        if not o:
+            messagebox.showwarning(APP, "Pick an output folder."); return
+        sep, kw = self.y_sep(), self.y_opts()
+        if not kw["variants"] and not kw["tune"]:
+            messagebox.showwarning(APP, "Mark at least one style or Natural pitch correction."); return
+        self._run_bg(lambda: C.styles_only(i, o, sep=sep, log=self.log, **kw), needs_refs=False)
 
     # ---------- tab: references ----------
     def tab_refs(self, nb):

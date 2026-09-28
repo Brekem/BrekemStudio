@@ -78,6 +78,11 @@ jobs:
             throw "6-stem separation offline failed: $($used | ConvertTo-Json -Compress)"
           }
           if (-not (Test-Path "smoke6\VARIANTS\01 CD MASTER.wav")) { throw "distribute + style failed" }
+          & $exe cli styles smoke.wav smoke_st --styles clarity --tune                         # Styles & Tune tab
+          foreach ($f in "TUNED MIX.wav", "ACAPELLA TUNED.wav", "VARIANTS\02 CLARITY.wav") {
+            if (-not (Test-Path "smoke_st\$f")) { throw "styles-only did not produce $f" }
+          }
+          Remove-Item -Recurse -Force smoke_st
           Remove-Item -Recurse -Force smoke6
           $need = "smoke_out\MASTER.wav", "smoke_out\ACAPELLA.wav", "smoke_out\INSTRUMENTAL.wav",
                   "smoke_out\VARIANTS\01 CD MASTER.wav", "smoke_out\VARIANTS\08 BREKEM SIGNATURE.wav",
