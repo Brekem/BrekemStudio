@@ -11,7 +11,7 @@ datas, binaries, hiddenimports = [], [], []
 
 for pkg in ("torch", "torchaudio", "demucs", "df", "matchering", "pedalboard",
             "librosa", "soxr", "lazy_loader", "audioread", "pooch", "statsmodels",
-            "pandas", "pyloudnorm", "numba", "llvmlite", "scipy", "sklearn"):
+            "pandas", "pyloudnorm", "numba", "llvmlite", "scipy", "sklearn", "parselmouth"):
     try:
         d, b, h = collect_all(pkg)
         datas += d; binaries += b; hiddenimports += h

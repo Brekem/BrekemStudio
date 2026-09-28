@@ -10,6 +10,7 @@ or depends on:
 | DeepFilterNet | MIT / Apache-2.0 | Vocal denoise/dereverb (model weights included by the pip package). |
 | PyTorch / torchaudio | BSD-3-Clause | |
 | pedalboard | GPL-3.0 | Spotify audio-effects library. |
+| Praat / Parselmouth | GPL-3.0 | Pitch analysis + PSOLA resynthesis for the natural pitch correction. |
 | numpy, scipy | BSD-3-Clause | |
 | soundfile (libsndfile) | BSD-3-Clause / LGPL-2.1 | |
 | librosa | ISC | |

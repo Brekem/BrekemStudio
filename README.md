@@ -103,6 +103,34 @@ and compared with the original song at the same loudness:
 In Distribute it only applies the peak part (the file is its own reference).
 CLI: `--no-guard` to turn it off.
 
+## Natural pitch correction (3.0)
+
+Tick **[X] Natural pitch correction** (Extras, every tab) and the vocal is tuned
+before anything else touches it — like Melodyne's automatic mode, not like
+hard auto-tune:
+
+- the **key** is read from the beat (chroma vs. major/minor key profiles); if it
+  is unclear the voice is tuned to the nearest semitone instead
+- each **sung note** is moved *as a whole* to the nearest note of the key, so its
+  centre lands in tune while the singer's own **vibrato, slides and scoops inside
+  the note are kept** (pieces under 120 ms — slides between notes — are left alone,
+  notes already within 8 cents too, and every move eases in/out over ~40 ms)
+- Praat's PSOLA (Parselmouth) moves the pitch **without moving the formants**, so
+  the voice keeps its timbre: no chipmunk, no metallic robot
+- only where someone sings (the vocal-activity mask), so the beat's bleed in the
+  vocal stem is never retuned
+
+On a test voice sung 25-45 cents off with ±30-cent vibrato: every note centre
+landed at 0 cents and the vibrato depth was unchanged. The retuned vocal is
+cached next to the stems. In **Mix from stems** it tunes your own vocal to the
+beat's key. In Distribute it needs AI Clean or a master style (it works on the
+separated vocal). CLI: `--tune`.
+
+**Styles & Tune tab (3.1)**: any audio (file or folder) in, *only* what you mark
+out: the master styles you tick and/or, with pitch correction ticked,
+`TUNED MIX.wav` (the song with the vocal in tune, nothing else changed) and
+`ACAPELLA TUNED.wav`. CLI: `brekem_cli.py styles "<audio|folder>" "<out>" --styles clarity,punch --tune`.
+
 ## Loudness
 
 All loudness targets are reached with one static gain + a 4x-oversampled

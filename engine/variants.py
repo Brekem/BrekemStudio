@@ -25,6 +25,7 @@ import os, sys, json, numpy as np, soundfile as sf, scipy.signal as sig
 SP = os.environ.get("BREKEM_HOME") or os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SP)
 import stems as ST
+import tune as TU
 from acap_pro import (SR, load, rms, deepfilter, debreath_at, deplosive_gated, dereverb, eq_sub,
                       vbus, glue, polish, bq_shelf, bq_peak, plate, loud_to, ebur, bands_arr,
                       run, WORK, STEMS)
@@ -148,7 +149,9 @@ if not (os.path.exists(os.path.join(SD, "vocals.flac")) and os.path.exists(os.pa
 raw = load(os.path.join(SD, "vocals.flac")); n = len(raw); r0 = rms(raw)
 nov = ST._fit(load(os.path.join(SD, "no_vocals.flac")), n)
 vact = ST.vocal_activity(raw, nov)
-cache = os.path.join(SD, "vocals_proc.wav")
+if TU.enabled():                                                 # natural pitch correction
+    raw = TU.tuned_vocal(SD, raw, nov, vact, log=L); r0 = rms(raw)
+cache = os.path.join(SD, TU.proc_cache())
 if os.path.exists(cache):
     vox = ST._fit(load(cache), n); L("vocal: cached clean chain")
 else:
