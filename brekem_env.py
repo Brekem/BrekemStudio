@@ -122,11 +122,16 @@ def run_engine(script, args, on_line=None, cwd=None):
             os.environ["BREKEM_PY"] = cli    # engines spawn demucs etc. through it too
     cmd = [exe, spath] + [str(a) for a in args]
     env = dict(os.environ)
+    # engine output is UTF-8 both ways: a reference or song named with symbols the Windows
+    # console code page can't show (e.g. U+29F9) used to crash the engine's print()
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
     creat = 0
     if os.name == "nt":
         creat = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                         text=True, bufsize=1, cwd=cwd or ENGINE, env=env,
+                         text=True, encoding="utf-8", errors="replace", bufsize=1,
+                         cwd=cwd or ENGINE, env=env,
                          creationflags=creat if os.name == "nt" else 0)
     for line in p.stdout:
         if on_line:
