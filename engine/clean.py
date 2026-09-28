@@ -10,6 +10,7 @@ sys.path.insert(0, SP)
 from acap_pro import (SR, load, rms, deepfilter, debreath_at, deplosive_gated,
                       dereverb, eq_sub, vbus, glue, STEMS)
 import stems as ST
+import tune as TU
 
 TAG = sys.argv[1]
 sd = os.path.join(STEMS, TAG)
@@ -21,6 +22,9 @@ if not (os.path.exists(vc) and os.path.exists(ic)):
 voc = load(vc); n = len(voc); r0 = rms(voc)
 raw = voc.copy()
 act = ST.vocal_activity(raw, load(ic))                # where the vocal stem really holds a vocal
+if TU.enabled():                                      # natural pitch correction
+    raw = TU.tuned_vocal(sd, raw, load(ic), act, log=lambda m: print(m, flush=True))
+    voc = raw.copy(); r0 = rms(voc)
 voc = deepfilter(voc, n)                      # noise / static / room
 voc, nb = debreath_at(voc, n, at_db=-9.0)     # breaths
 voc, npl = deplosive_gated(voc, n)            # plosives
@@ -28,7 +32,7 @@ voc = dereverb(voc)                           # tail / reverb
 voc = eq_sub(voc)                             # subtractive EQ (HPF + nasal/harsh dips)
 voc = vbus(voc)                               # vocal bus: de-ess + comp + presence/air
 rr = rms(voc); voc = voc * (r0 / rr) if rr > 0 else voc
-sf.write(os.path.join(sd, "vocals_proc.wav"), voc.astype(np.float32), SR, subtype="FLOAT")   # reused by variants.py
+sf.write(os.path.join(sd, TU.proc_cache()), voc.astype(np.float32), SR, subtype="FLOAT")   # reused by variants.py
 voc = ST.gate(voc, act)                       # bleed out of the acapella between phrases / in the tail
 print(f"clean: breath={nb} plosives={npl}", flush=True)
 

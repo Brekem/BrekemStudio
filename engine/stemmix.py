@@ -30,6 +30,7 @@ SP = _HOME
 sys.path.insert(0, SP)
 from acap_pro import deepfilter, deplosive_gated, dereverb   # limpieza de voz
 import stems as ST
+import tune as TU
 
 SR = 48000
 STEMDIR = sys.argv[1]
@@ -155,7 +156,12 @@ Li = lufs(inst)
 print(f"instrumental bus: {Li:.2f} LUFS  peak {20*np.log10(np.max(np.abs(inst))):.2f} dBFS", flush=True)
 
 # ---------------------------------------------------------------- voz limpia
-vraw = load(VOXFILE); nv = len(vraw); r0 = np.sqrt(np.mean(vraw**2))
+vraw = load(VOXFILE); nv = len(vraw)
+if TU.enabled():                                   # afinacion natural en la tonalidad del beat
+    _pcs, _lbl, _r = TU.detect_key(inst)
+    print(f"tune: key {_lbl}", flush=True)
+    vraw = TU.tune(vraw, _pcs, log=lambda m: print(m, flush=True))
+r0 = np.sqrt(np.mean(vraw**2))
 voc = deepfilter(vraw, nv)
 voc, _ = deplosive_gated(voc, len(voc))
 voc = dereverb(voc)

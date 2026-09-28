@@ -122,7 +122,11 @@ class App(ttk.Frame):
         b2, grd = self._xbox(ext, "Band guard (vocal / beat / bass / mids / highs stay inside the song's own range)",
                              True)
         b2.grid(row=1, column=0, sticky="w")
-        return lambda: dict(variants=[sid for sid, v in picks if v.get()], dry=dry.get(), guard=grd.get())
+        b3, tun = self._xbox(ext, "Natural pitch correction - auto-tune without the robot (key read from the beat, "
+                                  "vibrato and slides kept)", False)
+        b3.grid(row=2, column=0, sticky="w")
+        return lambda: dict(variants=[sid for sid, v in picks if v.get()], dry=dry.get(), guard=grd.get(),
+                            tune=tun.get())
 
     def _sep_row(self, f, row):
         """'Separation' dropdown; returns a getter for the chosen Demucs model."""

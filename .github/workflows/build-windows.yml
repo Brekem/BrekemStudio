@@ -67,7 +67,7 @@ jobs:
           vendor\ffmpeg.exe -v error -y -f lavfi -i "sine=f=110:d=20" -f lavfi -i "sine=f=330:d=20" `
             -f lavfi -i "anoisesrc=d=20:a=0.03:c=pink" -filter_complex "amix=inputs=3,volume=2,aformat=channel_layouts=stereo" `
             -ar 44100 smoke.wav
-          & $exe cli master smoke.wav smoke_out --fast --styles cd,signature      # default model: htdemucs_ft
+          & $exe cli master smoke.wav smoke_out --fast --tune --styles cd,signature   # default model: htdemucs_ft
           Write-Host "exit code: $LASTEXITCODE"
           $meta = "$env:LOCALAPPDATA\BrekemStudio\stems\smoke\stems.json"
           $used = Get-Content $meta | ConvertFrom-Json

@@ -13,6 +13,7 @@ from acap_pro import (SR, load, rms, ebur, bands_arr, deepfilter, vbus, glue, po
                       kweight, WORK, STEMS, debreath_at, deplosive_gated, dereverb,
                       eq_sub, plate, loud_to, bq_shelf, bq_peak, macro_expand)
 import stems as ST
+import tune as TU
 
 NAME = sys.argv[1]
 OUT  = sys.argv[2]
@@ -81,6 +82,9 @@ if not (os.path.exists(VC) and os.path.exists(IC)):
 voc = load(VC); n = len(voc); r0 = rms(voc)
 RAW = voc.copy()
 VACT = ST.vocal_activity(RAW, load(IC))      # where the vocal stem really holds a vocal
+if TU.enabled():                                  # natural pitch correction (whole notes, vibrato kept)
+    RAW = TU.tuned_vocal(os.path.join(STEMS, TAG), RAW, load(IC), VACT, log=L)
+    voc = RAW.copy(); r0 = rms(voc)
 voc = deepfilter(voc, n)
 voc, nb = debreath_at(voc, n, at_db=-9.0)
 voc, npl = deplosive_gated(voc, n)
@@ -88,7 +92,7 @@ voc = dereverb(voc)
 voc = eq_sub(voc)
 voc = vbus(voc)
 VOX = voc.copy()
-sf.write(os.path.join(STEMS, TAG, "vocals_proc.wav"), VOX.astype(np.float32), SR, subtype="FLOAT")   # reused by variants.py
+sf.write(os.path.join(STEMS, TAG, TU.proc_cache()), VOX.astype(np.float32), SR, subtype="FLOAT")   # reused by variants.py
 L(f"vocal pro: breath={nb} plos={npl}")
 
 # ---- 1) MASTER ----

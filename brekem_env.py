@@ -9,7 +9,7 @@ import sys
 import glob
 import subprocess
 
-VERSION = "2.0.0"
+VERSION = "3.0.0"
 FROZEN = getattr(sys, "frozen", False)
 
 def _res_root():

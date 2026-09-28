@@ -11,6 +11,7 @@ statsmodels>=0.14
 pandas>=2.0
 demucs>=4.0
 deepfilternet>=0.5.6
+praat-parselmouth>=0.4.3
 torch==2.8.0
 torchaudio==2.8.0
 # packaging only:
