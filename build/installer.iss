@@ -2,7 +2,7 @@
 ; Build:  ISCC.exe build\installer.iss   (run from project root, after PyInstaller)
 
 #define AppName "BREKEM STUDIO"
-#define AppVer  "3.1.0"
+#define AppVer  "3.1.1"
 #define AppExe  "BrekemStudio.exe"
 ; project root = folder above this .iss
 #define Root AddBackslash(SourcePath) + ".."

@@ -1,10 +1,18 @@
-## BREKEM STUDIO 3.1
+## BREKEM STUDIO 3.1.1
 
-Descarga **BREKEM STUDIO 3.1.0 Setup.exe**, ábrelo e instala. Todo viene dentro del
+Descarga **BREKEM STUDIO 3.1.1 Setup.exe**, ábrelo e instala. Todo viene dentro del
 instalador y funciona sin internet: Python y todas las librerías, FFmpeg, Praat y todos
 los modelos de IA (Demucs `htdemucs_ft`, `htdemucs_6s` y `htdemucs`, DeepFilterNet3).
 
-### Nuevo en 3.1: pestaña "Styles & Tune"
+### Arreglos en 3.1.1
+- **Masters con referencias**: el guardián de bandas ya no pelea con las referencias. Con
+  referencias solo controla los picos y el tono lo deciden las referencias, así que el
+  *air* y los graves por fin llegan al objetivo (antes un corte de -8 dB de air rebotaba).
+- **Nombres con símbolos raros** (por ejemplo `⧹` en una referencia) ya no rompen la
+  comparación con las referencias ni el veredicto x/6.
+- **ACAPELLA suave** ahora llega a su volumen objetivo (-12 LUFS).
+
+### 3.1: pestaña "Styles & Tune"
 - Cualquier audio (archivo o carpeta) → **solo** lo que marques con [X]: los estilos de
   máster que quieras (Clarity, Punch, Espacial…) y/o la afinación natural.
 - Con la afinación marcada saca **TUNED MIX.wav** (la canción con la voz afinada, nada más
