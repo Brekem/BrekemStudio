@@ -10,6 +10,9 @@ los modelos de IA (Demucs `htdemucs_ft`, `htdemucs_6s` y `htdemucs`, DeepFilterN
   carpeta del programa, y Windows no deja escribir ahí sin ser administrador. Ahora todos los
   registros van a `%LOCALAPPDATA%\BrekemStudio\logs` y funciona esté donde esté instalado.
 - Si un máster con referencias no sale, el log ahora lo dice claro (`!! ERROR`).
+- **Referencias con símbolos** (`⧹`) o acentos: el programa instalado todavía se caía con
+  `UnicodeEncodeError` al mostrar la comparación con las referencias (el arreglo de la 3.1.1
+  solo funcionaba desde el código fuente). Ahora el propio programa escribe en UTF-8.
 
 ### Arreglos en 3.1.1
 - **Masters con referencias**: el guardián de bandas ya no pelea con las referencias. Con

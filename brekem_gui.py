@@ -415,7 +415,7 @@ class App(ttk.Frame):
                     r = subprocess.run(
                         [E.FFMPEG, "-v", "error", "-y", "-i", p, "-ar", "48000",
                          "-ac", "2", "-c:a", "pcm_s24le", dst],
-                        capture_output=True, text=True,
+                        capture_output=True, text=True, encoding="utf-8", errors="replace",
                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                     if r.returncode != 0 or not os.path.exists(dst):
                         self.log(f"!! ffmpeg could not convert {os.path.basename(p)}: {r.stderr[-300:]}")

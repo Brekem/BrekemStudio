@@ -65,7 +65,7 @@ jobs:
         run: |
           $exe = "dist\BrekemStudio\BrekemStudioCLI.exe"
           # installed under Program Files the app folder is read-only for the user: test it that way
-          icacls "dist\BrekemStudio" /deny "${env:USERNAME}:(OI)(CI)(W)" | Out-Null
+          icacls "dist\BrekemStudio" /deny "${env:USERNAME}:(OI)(CI)(WD,AD,WEA,WA)" | Out-Null
           try { Set-Content "dist\BrekemStudio\_internal\engine\probe.txt" "x" -ErrorAction Stop
                 Remove-Item "dist\BrekemStudio\_internal\engine\probe.txt"
                 Write-Warning "app folder is still writable - the read-only check is not effective" }

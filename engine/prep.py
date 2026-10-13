@@ -22,7 +22,7 @@ os.makedirs(WORK, exist_ok=True); os.makedirs(STEMS, exist_ok=True)
 
 MODELS = ("htdemucs_ft", "htdemucs_6s", "htdemucs")
 
-def run(c): return subprocess.run(c, capture_output=True, text=True)
+def run(c): return subprocess.run(c, capture_output=True, text=True, encoding="utf-8", errors="replace")
 
 SRCIN  = sys.argv[1]
 TAG    = sys.argv[2]

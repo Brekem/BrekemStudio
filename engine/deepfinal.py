@@ -52,7 +52,7 @@ ALREADY_CLEAN = {  # lote reciente ya limpiado con clean_master.py -> solo pase 
  "Veo ft Power Walker v2 master.wav","sin importar oct 12 master.wav",
 }
 
-def run(c): return subprocess.run(c, capture_output=True, text=True)
+def run(c): return subprocess.run(c, capture_output=True, text=True, encoding="utf-8", errors="replace")
 def rms(x): return float(np.sqrt(np.mean(x**2))+1e-12)
 def load(p):
     x,s=sf.read(p,dtype="float64",always_2d=True)

@@ -390,7 +390,7 @@ def _ebur(path):
     import subprocess
     r = subprocess.run([E.FFMPEG, "-hide_banner", "-nostats", "-i", path,
                         "-af", "ebur128=peak=true", "-f", "null", "-"],
-                       capture_output=True, text=True,
+                       capture_output=True, text=True, encoding="utf-8", errors="replace",
                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     s = r.stderr.split("Summary:")[-1]
     def g(k, u):
