@@ -34,7 +34,7 @@ MAST = os.path.join(_WORK, "_masters")
 DSTD = os.path.join(_WORK, "_out")
 WORK = _WORK
 STEMS = _STEMS
-LOG  = os.path.join(SP, "deepfinal.log")
+LOG  = os.path.join(os.environ.get("BREKEM_LOGS") or SP, "deepfinal.log")
 SR   = 48000
 os.makedirs(DSTD, exist_ok=True); os.makedirs(WORK, exist_ok=True); os.makedirs(STEMS, exist_ok=True)
 
@@ -61,7 +61,9 @@ def load(p):
         g=np.gcd(int(s),SR); x=sig.resample_poly(x,SR//g,s//g,axis=0)
     return x
 def slog(m):
-    with open(LOG,"a",encoding="utf-8") as f: f.write(m+"\n")
+    try:
+        with open(LOG,"a",encoding="utf-8") as f: f.write(m+"\n")
+    except Exception: pass
     print(m,flush=True)
 
 # ---------- DeepFilterNet (una sola vez) ----------

@@ -240,6 +240,8 @@ def master_one(audio, outdir, care=True, log=print, sep=None, shifts=1, variants
         s = bsnap.get(k)
         if s and os.path.exists(s):
             shutil.copy2(s, os.path.join(outdir, k + ".wav"))
+    if not os.path.exists(os.path.join(outdir, "MASTER.wav")):
+        log("!! ERROR: the reference master produced no MASTER.wav - see the engine error above")
     _encode_extras(outdir, log)
     shutil.rmtree(stage, ignore_errors=True)
     _cleanup_keep()

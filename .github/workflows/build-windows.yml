@@ -64,6 +64,12 @@ jobs:
           NO_PROXY: ""
         run: |
           $exe = "dist\BrekemStudio\BrekemStudioCLI.exe"
+          # installed under Program Files the app folder is read-only for the user: test it that way
+          icacls "dist\BrekemStudio" /deny "${env:USERNAME}:(OI)(CI)(W)" | Out-Null
+          try { Set-Content "dist\BrekemStudio\_internal\engine\probe.txt" "x" -ErrorAction Stop
+                Remove-Item "dist\BrekemStudio\_internal\engine\probe.txt"
+                Write-Warning "app folder is still writable - the read-only check is not effective" }
+          catch { Write-Host "app folder is read-only (like Program Files)" }
           vendor\ffmpeg.exe -v error -y -f lavfi -i "sine=f=110:d=20" -f lavfi -i "sine=f=330:d=20" `
             -f lavfi -i "anoisesrc=d=20:a=0.03:c=pink" -filter_complex "amix=inputs=3,volume=2,aformat=channel_layouts=stereo" `
             -ar 44100 smoke.wav
@@ -93,7 +99,24 @@ jobs:
             Get-ChildItem "$env:LOCALAPPDATA\BrekemStudio" -Recurse -Filter *.log | ForEach-Object { Write-Host "== $_"; Get-Content $_ -Tail 60 }
             throw "frozen app did not produce: $($miss -join ', ')"
           }
+          # reference mode (the main Master tab with references), incl. a reference named with a symbol
+          $refs = "$env:LOCALAPPDATA\BrekemStudio\refs"
+          New-Item -ItemType Directory -Force $refs | Out-Null
+          vendor\ffmpeg.exe -v error -y -f lavfi -i "sine=f=82:d=30" -f lavfi -i "anoisesrc=d=30:a=0.08:c=pink" `
+            -filter_complex "amix=inputs=2,volume=3,aformat=channel_layouts=stereo" -ar 44100 "$refs\ref_a.wav"
+          vendor\ffmpeg.exe -v error -y -f lavfi -i "sine=f=196:d=30" -f lavfi -i "anoisesrc=d=30:a=0.05:c=white" `
+            -filter_complex "amix=inputs=2,volume=3,aformat=channel_layouts=stereo" -ar 44100 "$refs\ref_b.wav"
+          Rename-Item "$refs\ref_b.wav" ("Mix - ref " + [char]0x29F9 + "001 - b.wav")
+          & $exe cli master smoke.wav smoke_ref --fast 2>&1 | Tee-Object -FilePath smoke_ref.log
+          if (Select-String -Path smoke_ref.log -Pattern "Traceback|PermissionError|!! ERROR" -Quiet) {
+            throw "reference-mode master raised an error (see the log above)"
+          }
+          foreach ($f in "MASTER.wav", "ACAPELLA.wav", "INSTRUMENTAL.wav") {
+            if (-not (Test-Path "smoke_ref\$f")) { throw "reference-mode master did not produce $f" }
+          }
+          Remove-Item -Recurse -Force smoke_ref, smoke_ref.log, $refs
           Remove-Item -Recurse -Force smoke_out, smoke.wav
+          icacls "dist\BrekemStudio" /remove:d "${env:USERNAME}" | Out-Null
 
       - name: Installer (Inno Setup)
         run: |

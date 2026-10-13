@@ -9,7 +9,7 @@ import sys
 import glob
 import subprocess
 
-VERSION = "3.1.1"
+VERSION = "3.1.2"
 FROZEN = getattr(sys, "frozen", False)
 
 def _res_root():
@@ -81,6 +81,7 @@ def apply_env():
     os.environ["BREKEM_WORK"]  = WORK
     os.environ["BREKEM_STEMS"] = STEMS
     os.environ["BREKEM_REFS"]  = REFS
+    os.environ["BREKEM_LOGS"]  = LOGS    # engine logs: the install folder (Program Files) is read-only
     os.environ["BREKEM_PY"]    = sys.executable
     os.environ["BREKEM_FFMPEG"]  = FFMPEG
     os.environ["BREKEM_FFPROBE"] = FFPROBE
@@ -131,7 +132,7 @@ def run_engine(script, args, on_line=None, cwd=None):
         creat = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                          text=True, encoding="utf-8", errors="replace", bufsize=1,
-                         cwd=cwd or ENGINE, env=env,
+                         cwd=cwd or WORK, env=env,   # never the install folder: it is read-only
                          creationflags=creat if os.name == "nt" else 0)
     for line in p.stdout:
         if on_line:
