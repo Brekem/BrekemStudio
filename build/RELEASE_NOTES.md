@@ -1,8 +1,23 @@
-## BREKEM STUDIO 3.1.1
+## BREKEM STUDIO 3.1.2
 
-Descarga **BREKEM STUDIO 3.1.1 Setup.exe**, ábrelo e instala. Todo viene dentro del
+Descarga **BREKEM STUDIO 3.1.2 Setup.exe**, ábrelo e instala. Todo viene dentro del
 instalador y funciona sin internet: Python y todas las librerías, FFmpeg, Praat y todos
 los modelos de IA (Demucs `htdemucs_ft`, `htdemucs_6s` y `htdemucs`, DeepFilterNet3).
+
+### Arreglo en 3.1.2
+- **Instalado en Program Files**: el MASTER con referencias fallaba con
+  `PermissionError ... track_v2.log` porque el motor guardaba su registro dentro de la
+  carpeta del programa, y Windows no deja escribir ahí sin ser administrador. Ahora todos los
+  registros van a `%LOCALAPPDATA%\BrekemStudio\logs` y funciona esté donde esté instalado.
+- Si un máster con referencias no sale, el log ahora lo dice claro (`!! ERROR`).
+- **Referencias con símbolos** (`⧹`) o acentos: el programa instalado todavía se caía con
+  `UnicodeEncodeError` al mostrar la comparación con las referencias (el arreglo de la 3.1.1
+  solo funcionaba desde el código fuente). Ahora el propio programa escribe en UTF-8.
+
+- **Volumen con referencias fuertes**: el MASTER siempre salía a -9.3 LUFS, así que con
+  referencias más fuertes (reggaetón/pop a -8 o -7) fallaba el punto *loudness* y el
+  programa no tenía cómo corregirlo. Ahora el volumen sigue a la referencia más suave
+  (nunca más bajo que -9.3 ni más fuerte que -7.0, para no aplastarlo).
 
 ### Arreglos en 3.1.1
 - **Masters con referencias**: el guardián de bandas ya no pelea con las referencias. Con

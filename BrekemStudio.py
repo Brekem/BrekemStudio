@@ -48,7 +48,12 @@ def main():
     multiprocessing.freeze_support()          # a frozen multiprocessing child never reaches the GUI
     for k in ("stdout", "stderr"):            # windowed build: no console -> give print/tqdm a sink
         if getattr(sys, k) is None:
-            setattr(sys, k, open(os.devnull, "w"))
+            setattr(sys, k, open(os.devnull, "w", encoding="utf-8"))
+        else:   # output is UTF-8 (names like U+29F9); the frozen exe ignores PYTHONIOENCODING/PYTHONUTF8
+            try:
+                getattr(sys, k).reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
     here = os.path.dirname(os.path.abspath(__file__))
     if here not in sys.path:
         sys.path.insert(0, here)

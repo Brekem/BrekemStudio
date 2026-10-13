@@ -240,6 +240,8 @@ def master_one(audio, outdir, care=True, log=print, sep=None, shifts=1, variants
         s = bsnap.get(k)
         if s and os.path.exists(s):
             shutil.copy2(s, os.path.join(outdir, k + ".wav"))
+    if not os.path.exists(os.path.join(outdir, "MASTER.wav")):
+        log("!! ERROR: the reference master produced no MASTER.wav - see the engine error above")
     _encode_extras(outdir, log)
     shutil.rmtree(stage, ignore_errors=True)
     _cleanup_keep()
@@ -388,7 +390,7 @@ def _ebur(path):
     import subprocess
     r = subprocess.run([E.FFMPEG, "-hide_banner", "-nostats", "-i", path,
                         "-af", "ebur128=peak=true", "-f", "null", "-"],
-                       capture_output=True, text=True,
+                       capture_output=True, text=True, encoding="utf-8", errors="replace",
                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     s = r.stderr.split("Summary:")[-1]
     def g(k, u):

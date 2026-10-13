@@ -22,7 +22,7 @@ os.makedirs(OUT, exist_ok=True)
 TAG  = re.sub(r"\s*master\.wav$", "", NAME).replace(" ", "_")[:60]
 VC   = os.path.join(STEMS, TAG, "vocals.flac")
 IC   = os.path.join(STEMS, TAG, "no_vocals.flac")
-LOG  = os.path.join(SP, "noref.log")
+LOG  = os.path.join(os.environ.get("BREKEM_LOGS") or SP, "noref.log")
 
 def L(m):
     try: open(LOG, "a", encoding="utf-8").write(str(m) + "\n")

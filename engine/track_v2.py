@@ -49,9 +49,11 @@ os.makedirs(OUT, exist_ok=True)
 TAG  = re.sub(r"\s*master\.wav$", "", NAME).replace(" ", "_")[:60]
 VC   = os.path.join(STEMS, TAG, "vocals.flac")
 IC   = os.path.join(STEMS, TAG, "no_vocals.flac")
-LOG  = os.path.join(SP, "track_v2.log")
+LOG  = os.path.join(os.environ.get("BREKEM_LOGS") or SP, "track_v2.log")
 def L(m):
-    open(LOG, "a", encoding="utf-8").write(str(m) + "\n"); print(m, flush=True)
+    try: open(LOG, "a", encoding="utf-8").write(str(m) + "\n")
+    except Exception: pass
+    print(m, flush=True)
 
 REFS = _refdict()
 def corr_of(p):
@@ -204,7 +206,12 @@ if ST.guard_enabled():
     # (holding the tone to the original song undid the matching: a -8 dB air cut came back +3 dB)
     y = ST.guard(y, ST._fit(RAW, len(y)) + ST._fit(load(IC), len(y)), tone_tol_db=99.0, log=L)
 pk = np.max(np.abs(y)); y = y*(0.995/pk) if pk > 0.995 else y
-loud_to(w(os.path.join(WORK, "tv_m3.wav"), y), oM, Itgt=-9.3, tp_lin=0.871, drive=0.87)
+# loudness follows the references: at least as loud as the quietest one (the verdict's
+# "loudness >= ref min"), never quieter than -9.3, never past -7.0 (no crushed master)
+_ri = [i for i in (ebur(p)[0] for p in REFS.values()) if i is not None]
+ITGT = float(np.clip(min(_ri) - 0.2, -9.3, -7.0)) if _ri else -9.3
+if ITGT > -9.3: L(f"loudness target {ITGT:.1f} LUFS (quietest reference {min(_ri):.1f})")
+loud_to(w(os.path.join(WORK, "tv_m3.wav"), y), oM, Itgt=ITGT, tp_lin=0.871, drive=0.87)
 Im, Lm, Tm = ebur(oM); L(f"[1] MASTER       I={Im:6.1f} LRA={Lm:4.1f} TP={Tm:5.1f} corr{corr_of(oM):+.2f}")
 
 # 2) INSTRUMENTAL
@@ -218,7 +225,7 @@ if ST.guard_enabled():
     y = ST.guard(y, ST._fit(load(IC), len(y)), tone_tol_db=99.0, log=L)   # peaks only (see MASTER)
 y = np.tanh(y*1.6)/np.tanh(1.6)                         # soft-clip suave: raspa picos, sube RMS alcanzable
 pk = np.max(np.abs(y)); y = y*(0.995/pk) if pk > 0.995 else y
-loud_to(w(os.path.join(WORK, "tv_i2.wav"), y), oI, Itgt=-9.3, tp_lin=0.871, drive=0.87)
+loud_to(w(os.path.join(WORK, "tv_i2.wav"), y), oI, Itgt=ITGT, tp_lin=0.871, drive=0.87)
 Ii, Li, Ti = ebur(oI); L(f"[2] INSTRUMENTAL I={Ii:6.1f} LRA={Li:4.1f} TP={Ti:5.1f} corr{corr_of(oI):+.2f}")
 
 # 3) ACAPELLA

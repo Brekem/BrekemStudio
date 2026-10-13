@@ -35,9 +35,11 @@ MF = os.path.join(_WORK, "_out")
 DAC = os.path.join(_WORK, "_acap")
 BKP = os.path.join(_WORK, "_acap_bkp")
 CJ = os.path.join(_WORK, "_cj")
-LOG  = os.path.join(SP, "acap_pro.log")
+LOG  = os.path.join(os.environ.get("BREKEM_LOGS") or SP, "acap_pro.log")
 def L(m):
-    open(LOG, "a", encoding="utf-8").write(m + "\n"); print(m, flush=True)
+    try: open(LOG, "a", encoding="utf-8").write(m + "\n")
+    except Exception: pass
+    print(m, flush=True)
 
 MODE = sys.argv[1] if len(sys.argv) > 1 else "cojelo"
 

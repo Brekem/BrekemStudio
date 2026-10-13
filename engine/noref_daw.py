@@ -13,7 +13,7 @@ from acap_pro import (SR, load, rms, ebur, bands_arr, glue, polish, plate,
 
 MIXP, INSTP, VOXP, OUT = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 os.makedirs(OUT, exist_ok=True)
-LOG = os.path.join(SP, "noref_daw.log")
+LOG = os.path.join(os.environ.get("BREKEM_LOGS") or SP, "noref_daw.log")
 
 def L(m):
     try: open(LOG, "a", encoding="utf-8").write(str(m) + "\n")

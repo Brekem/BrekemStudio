@@ -41,8 +41,11 @@ CORR_M   = float(sys.argv[8]) if len(sys.argv) > 8 else 0.80   # corr objetivo d
 NARROW_M = float(sys.argv[9]) if len(sys.argv) > 9 else 0.0     # estrecha el master DESPUES del matchering (0=off)
 os.makedirs(OUT, exist_ok=True)
 
-LOG = os.path.join(SP, "daw_song.log")
-def L(m): open(LOG, "a", encoding="utf-8").write(str(m) + "\n"); print(m, flush=True)
+LOG = os.path.join(os.environ.get("BREKEM_LOGS") or SP, "daw_song.log")
+def L(m):
+    try: open(LOG, "a", encoding="utf-8").write(str(m) + "\n")
+    except Exception: pass
+    print(m, flush=True)
 def w(tmp, arr): sf.write(tmp, np.asarray(arr, np.float32), SR, subtype="PCM_24"); return tmp
 
 REFS = _refdict()
