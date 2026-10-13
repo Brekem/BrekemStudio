@@ -26,6 +26,7 @@ SP = os.environ.get("BREKEM_HOME") or os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SP)
 import stems as ST
 import tune as TU
+import exciter as EX
 from acap_pro import (SR, load, rms, deepfilter, debreath_at, deplosive_gated, dereverb, eq_sub,
                       vbus, glue, polish, bq_shelf, bq_peak, plate, loud_to, ebur, bands_arr,
                       run, WORK, STEMS)
@@ -231,6 +232,8 @@ for name, over in STYLES:
     if p["pres"]: mix = bq_peak(mix, 3500.0, p["pres"], 0.7)
     if p["air"]: mix = bq_shelf(mix, 11000.0, p["air"], True)
     mix = tape(mix, p["tape"])
+    if EX.enabled():
+        mix = EX.excite(mix, log=lambda m: L("  " + m))
     if GREF is not None:                    # style keeps its colour (+-4 dB per band), never leaves the song's range
         mix = ST.guard(mix, GREF, tone_tol_db=4.0, log=lambda m: L("  " + m))
     pk = np.max(np.abs(mix)); mix = mix * (0.995 / pk) if pk > 0.995 else mix

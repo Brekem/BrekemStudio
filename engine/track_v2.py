@@ -31,6 +31,7 @@ from acap_pro import (SR, load, rms, run, ebur, bands_arr, deepfilter, vbus, glu
 import re, matchering as mg
 import stems as ST
 import tune as TU
+import exciter as EX
 try:
     mg.log(info_handler=lambda *a, **k: None, warning_handler=lambda *a, **k: None)
 except Exception:
@@ -193,6 +194,7 @@ pk = np.max(np.abs(mix)); mix = mix*(0.99/pk) if pk > 0.99 else mix
 pB = libmaster(w(os.path.join(WORK, "tv_m0.wav"), mix), os.path.join(WORK, "tv_m1.wav"))
 y = bbmatch(load(pB)); pk = np.max(np.abs(y)); y = y*(0.995/pk) if pk > 0.995 else y
 y = matchering_avg(w(os.path.join(WORK, "tv_m2.wav"), y), "tv")
+if EX.enabled(): y = EX.excite(y, log=L)    # harmonics before the tone moves, so the verdict loop sees them
 y = bq_shelf(y, 75.0, SHELF_DB, False)      # low-shelf 60-90 Hz (default +1.5, override por argv[4])
 if AIR_DB != 0.0: y = bq_shelf(y, 9000.0, AIR_DB, True)   # high-shelf de aire (override por argv[5])
 if PRES_DB != 0.0: y = bq_peak(y, 3500.0, PRES_DB, 0.7)   # peak de presencia 2-6 kHz (override por argv[7])
@@ -220,6 +222,7 @@ inst = glue(ST.instrumental(TAG, lambda x: transient_shape(x, boost_db=2.5), log
 pk = np.max(np.abs(inst)); inst = inst*(0.99/pk) if pk > 0.99 else inst
 pB = libmaster(w(os.path.join(WORK, "tv_i0.wav"), inst), os.path.join(WORK, "tv_i1.wav"))
 y = mono_narrow(polish(load(pB)), 0.82)                 # estrecha ANTES de limitar -> mas headroom
+if EX.enabled(): y = EX.excite(y, log=L)
 y = bq_shelf(y, 75.0, SHELF_DB, False)                  # mismo shelf de graves que el master
 if ST.guard_enabled():
     y = ST.guard(y, ST._fit(load(IC), len(y)), tone_tol_db=99.0, log=L)   # peaks only (see MASTER)

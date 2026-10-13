@@ -1,8 +1,21 @@
-## BREKEM STUDIO 3.1.2
+## BREKEM STUDIO 3.2.0
 
-Descarga **BREKEM STUDIO 3.1.2 Setup.exe**, ábrelo e instala. Todo viene dentro del
+Descarga **BREKEM STUDIO 3.2.0 Setup.exe**, ábrelo e instala. Todo viene dentro del
 instalador y funciona sin internet: Python y todas las librerías, FFmpeg, Praat y todos
 los modelos de IA (Demucs `htdemucs_ft`, `htdemucs_6s` y `htdemucs`, DeepFilterNet3).
+
+### Nuevo en 3.2: Exciter
+- Marca **[X] Exciter** en Extras (en todas las pestañas). Crea **armónicos nuevos** a partir
+  de la música misma, como un Aphex Aural Exciter arriba y un MaxxBass abajo, en vez de
+  solo subir el EQ (que también sube el soplido):
+  - **Agudos**: brillo y *air* (cerca de +1.3 dB arriba de 5 kHz). Se aguanta solo en las
+    "S", así que no pone la voz áspera.
+  - **Bajo**: armónicos del sub (70-200 Hz) para que el bajo **se oiga en celulares, laptops
+    y audífonos** que no tocan el sub. Funciona hasta con un 808 limpio. No toca la zona
+    del "mud" (250 Hz para arriba).
+  - Solo suena donde hay música: el soplido en los silencios y en el final no sube.
+- Va en MASTER, INSTRUMENTAL y todos los estilos, antes del guardián y del limitador: el
+  volumen final es el mismo. La ACAPELLA no se toca.
 
 ### Arreglo en 3.1.2
 - **Instalado en Program Files**: el MASTER con referencias fallaba con

@@ -131,6 +131,27 @@ out: the master styles you tick and/or, with pitch correction ticked,
 `TUNED MIX.wav` (the song with the vocal in tune, nothing else changed) and
 `ACAPELLA TUNED.wav`. CLI: `brekem_cli.py styles "<audio|folder>" "<out>" --styles clarity,punch --tune`.
 
+## Exciter (3.2)
+
+Tick **[X] Exciter** (Extras, every tab, off by default). An EQ can only turn up
+what is already there (hiss included); the exciter *creates* new overtones from the
+music itself, like an Aphex Aural Exciter on the top and Waves MaxxBass on the bottom:
+
+- **highs**: the band above 3 kHz goes through a soft saturator. Only the *new*
+  harmonics above 5 kHz are kept and mixed back low: sparkle and air (about +1.3 dB
+  above 5 kHz). Where an "S" spikes the exciter backs off, so it never adds harshness.
+- **bass**: the sub (30-110 Hz, centre only) gives its 2nd / 3rd harmonics (70-200 Hz,
+  kept under the mud zone), so the bass is heard on phones, laptops and earbuds that
+  can't play the sub. A clean 808 with no overtones gets them too. The layer always
+  adds in phase with the bass's own overtones, never cancels them.
+- both layers only play where the song plays (50+ dB under the loud parts = off), so
+  hiss in gaps and in the tail is never brought up.
+
+It runs on MASTER, INSTRUMENTAL and every master style, before the band guard and the
+limiter: the loudness target doesn't change, the guard still holds every band inside
+the song's range, and with references the verdict loop still matches their tone.
+ACAPELLA is never excited. CLI: `--exciter`.
+
 ## Loudness
 
 All loudness targets are reached with one static gain + a 4x-oversampled

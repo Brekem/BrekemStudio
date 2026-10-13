@@ -14,6 +14,7 @@ from acap_pro import (SR, load, rms, ebur, bands_arr, deepfilter, vbus, glue, po
                       eq_sub, plate, loud_to, bq_shelf, bq_peak, macro_expand)
 import stems as ST
 import tune as TU
+import exciter as EX
 
 NAME = sys.argv[1]
 OUT  = sys.argv[2]
@@ -109,6 +110,7 @@ mix = bq_shelf(mix, 12000.0, 1.0, True) # gentle air
 _, lra0, _ = ebur(w(os.path.join(WORK, "nr_m0.wav"), mix)); lra0 = lra0 or 6.0
 if lra0 < 6.0:
     mix = macro_expand(mix, ratio=1.25 + (6.0 - lra0) * 0.22)   # recover crushed dynamics
+if EX.enabled(): mix = EX.excite(mix, log=L)                   # new harmonics: brighter top, bass heard on phones
 if ST.guard_enabled():                                          # every band inside the song's own range
     mix = ST.guard(mix, ST._fit(RAW, len(mix)) + ST._fit(load(IC), len(mix)), tone_tol_db=3.0, log=L)
 pk = np.max(np.abs(mix)); mix = mix * (0.995 / pk) if pk > 0.995 else mix
@@ -121,6 +123,7 @@ oI = os.path.join(OUT, PFX + "INSTRUMENTAL.wav")
 y = glue(ST.instrumental(TAG, lambda x: transient_shape(x, boost_db=2.5), log=L))
 y = mono_narrow(polish(y), 0.82)
 y = bq_shelf(y, 80.0, 1.0, False)
+if EX.enabled(): y = EX.excite(y, log=L)
 if ST.guard_enabled():
     y = ST.guard(y, ST._fit(load(IC), len(y)), tone_tol_db=3.0, log=L)
 y = np.tanh(y * 1.5) / np.tanh(1.5)

@@ -107,7 +107,7 @@ class App(ttk.Frame):
         return b, var
 
     def _opts_panel(self, f, row, styles=()):
-        """styles (each its own [X]) + dry bass [X] + band guard [X]; returns a getter."""
+        """styles (each its own [X]) + dry bass / band guard / tuning / exciter [X]; returns a getter."""
         box = ttk.LabelFrame(f, text="Master styles  (mark with X the ones you want, each comes out separately)",
                              padding=6)
         box.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(10, 0))
@@ -126,8 +126,11 @@ class App(ttk.Frame):
         b3, tun = self._xbox(ext, "Natural pitch correction - auto-tune without the robot (key read from the beat, "
                                   "vibrato and slides kept)", False)
         b3.grid(row=2, column=0, sticky="w")
+        b4, exc = self._xbox(ext, "Exciter - new harmonics: brighter, airier top + bass you hear on phones and "
+                                  "earbuds (no hiss lifted)", False)
+        b4.grid(row=3, column=0, sticky="w")
         return lambda: dict(variants=[sid for sid, v in picks if v.get()], dry=dry.get(), guard=grd.get(),
-                            tune=tun.get())
+                            tune=tun.get(), exciter=exc.get())
 
     def _sep_row(self, f, row):
         """'Separation' dropdown; returns a getter for the chosen Demucs model."""

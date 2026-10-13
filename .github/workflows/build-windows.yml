@@ -73,12 +73,12 @@ jobs:
           vendor\ffmpeg.exe -v error -y -f lavfi -i "sine=f=110:d=20" -f lavfi -i "sine=f=330:d=20" `
             -f lavfi -i "anoisesrc=d=20:a=0.03:c=pink" -filter_complex "amix=inputs=3,volume=2,aformat=channel_layouts=stereo" `
             -ar 44100 smoke.wav
-          & $exe cli master smoke.wav smoke_out --fast --tune --styles cd,signature   # default model: htdemucs_ft
+          & $exe cli master smoke.wav smoke_out --fast --tune --exciter --styles cd,signature   # default model: htdemucs_ft
           Write-Host "exit code: $LASTEXITCODE"
           $meta = "$env:LOCALAPPDATA\BrekemStudio\stems\smoke\stems.json"
           $used = Get-Content $meta | ConvertFrom-Json
           if ($used.used -ne "htdemucs_ft") { throw "default separation fell back to $($used.used) - htdemucs_ft not bundled?" }
-          & $exe cli distribute smoke.wav smoke6 --sep htdemucs_6s --no-split --styles cd   # 6 stems, offline
+          & $exe cli distribute smoke.wav smoke6 --sep htdemucs_6s --no-split --styles cd --exciter   # 6 stems, offline
           $used = Get-Content $meta | ConvertFrom-Json
           if ($used.used -ne "htdemucs_6s" -or -not ($used.stems -contains "guitar")) {
             throw "6-stem separation offline failed: $($used | ConvertTo-Json -Compress)"
@@ -107,7 +107,7 @@ jobs:
           vendor\ffmpeg.exe -v error -y -f lavfi -i "sine=f=196:d=30" -f lavfi -i "anoisesrc=d=30:a=0.05:c=white" `
             -filter_complex "amix=inputs=2,volume=3,aformat=channel_layouts=stereo" -ar 44100 "$refs\ref_b.wav"
           Rename-Item "$refs\ref_b.wav" ("Mix - ref " + [char]0x29F9 + "001 - b.wav")
-          & $exe cli master smoke.wav smoke_ref --fast 2>&1 | Tee-Object -FilePath smoke_ref.log
+          & $exe cli master smoke.wav smoke_ref --fast --exciter 2>&1 | Tee-Object -FilePath smoke_ref.log
           if (Select-String -Path smoke_ref.log -Pattern "Traceback|PermissionError|!! ERROR" -Quiet) {
             throw "reference-mode master raised an error (see the log above)"
           }
