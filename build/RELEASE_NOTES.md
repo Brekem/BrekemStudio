@@ -1,8 +1,26 @@
-## BREKEM STUDIO 3.2.0
+## BREKEM STUDIO 3.3.0
 
-Descarga **BREKEM STUDIO 3.2.0 Setup.exe**, ábrelo e instala. Todo viene dentro del
-instalador y funciona sin internet: Python y todas las librerías, FFmpeg, Praat y todos
-los modelos de IA (Demucs `htdemucs_ft`, `htdemucs_6s` y `htdemucs`, DeepFilterNet3).
+**Dos instaladores. Escoge uno:**
+
+- **Tienes tarjeta NVIDIA (GTX 16, RTX 20 / 30 / 40 / 50): edición GPU.** Descarga
+  `BREKEM.STUDIO.3.3.0.GPU.Setup.exe` **y todos los archivos `.bin`** que tienen el mismo
+  nombre, en una carpeta vacía. Abre el `.exe`: él solo usa los `.bin`.
+- **No tienes NVIDIA: edición normal.** Descarga `BREKEM.STUDIO.3.3.0.Setup.exe`.
+
+Todo viene dentro del instalador y funciona sin internet: Python y todas las librerías,
+FFmpeg, Praat y todos los modelos de IA (Demucs `htdemucs_ft`, `htdemucs_6s` y `htdemucs`,
+DeepFilterNet3).
+
+### Nuevo en 3.3: usa tu tarjeta NVIDIA (CUDA)
+- La edición GPU corre la **separación de stems (Demucs)** y la **limpieza de voz
+  (DeepFilterNet)** en la tarjeta. Es la parte lenta: en el CPU tarda minutos por canción.
+- En RTX 30 / 40 / 50 usa los **tensor cores** (TF32). No usa fp16, así que los stems
+  salen con la misma calidad que en el CPU.
+- Al abrir, el log dice qué tarjeta encontró y qué corre en ella, por ejemplo
+  `GPU: NVIDIA GeForce RTX 4070 (12 GB, CUDA 12.8) - AI separation + vocal cleaning run on it`.
+- Si la tarjeta no sirve (driver viejo, tarjeta muy vieja) o se queda sin memoria,
+  todo sigue en el CPU, como antes, sin fallar.
+- Necesita un **driver NVIDIA reciente** (2025 o más nuevo).
 
 ### Nuevo en 3.2: Exciter
 - Marca **[X] Exciter** en Extras (en todas las pestañas). Crea **armónicos nuevos** a partir

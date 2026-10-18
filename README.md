@@ -152,6 +152,32 @@ limiter: the loudness target doesn't change, the guard still holds every band in
 the song's range, and with references the verdict loop still matches their tone.
 ACAPELLA is never excited. CLI: `--exciter`.
 
+## NVIDIA GPU (3.3)
+
+Two installers per release:
+
+- **BREKEM STUDIO x.y.z Setup.exe**: CPU edition, runs on any PC.
+- **BREKEM.STUDIO.x.y.z.GPU.Setup.exe + its `.bin` parts**: GPU edition, built with
+  CUDA 12.8 PyTorch. Download the `.exe` and **every** `.bin` into the same empty folder
+  and run the `.exe`.
+
+With an NVIDIA card (GTX 16, RTX 20 / 30 / 40 / 50) and a recent driver, the GPU edition
+runs the AI parts on the card: the **Demucs separation** (the slow step: minutes on a
+CPU) and the **DeepFilterNet** vocal cleaning. On RTX 30 / 40 / 50 the matrix math uses
+the **tensor cores** (TF32; convolutions already do through cuDNN). No fp16, so the
+stems are the same quality as on the CPU. Everything else (EQ, matching, tuning,
+exciter, limiter) is CPU DSP and is unchanged.
+
+The app probes the card at startup with a real GPU computation and says in the log what
+runs where, e.g. `GPU: NVIDIA GeForce RTX 4070 (12 GB, CUDA 12.8) - AI separation +
+vocal cleaning run on it, tensor cores (TF32)`. No usable card (old driver, older
+GPU), or the CPU edition: everything runs on the CPU, as before. If the GPU separation
+fails (e.g. out of video memory) that song is separated again on the CPU. CLI: `--cpu`
+turns the GPU off.
+
+From source: after `pip install -r requirements.txt`, swap in the CUDA build with
+`pip install --force-reinstall --no-deps torch==2.8.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu128`.
+
 ## Loudness
 
 All loudness targets are reached with one static gain + a 4x-oversampled
@@ -185,7 +211,8 @@ CLI: `python brekem_cli.py master "<song>" "<out>" --sep htdemucs_6s --shifts 2`
 ## Build the installer
 
 See `build/BUILD.md`. Short version: `build\build.bat` runs PyInstaller and (if
-Inno Setup is installed) produces `BREKEM STUDIO Setup.exe`.
+Inno Setup is installed) produces `BREKEM STUDIO Setup.exe`; `build\build.bat gpu`
+builds the GPU edition (CUDA PyTorch).
 
 ## License
 

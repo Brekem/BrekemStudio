@@ -13,6 +13,8 @@ STYLE OPTS (every command): --styles cd,clarity,espacial,punch,warm,club,streami
   --no-dry-bass  keep the bass as separated (default: centred + dry)
   --no-guard     no band guard (default: every band stays inside the song's own range)
   --tune         natural pitch correction: each sung note moved to the key, vibrato kept
+  --cpu          GPU edition: don't use the NVIDIA GPU (by default the AI separation and
+                 vocal cleaning run on it when there is one)
   --exciter      harmonic exciter on the master: new overtones up top (air, sparkle) and
                  bass harmonics (the bass is heard on phones / earbuds)
   brekem_cli.py stemmix  "<stemdir>" "<voxfile>" "<outdir>" [--vox -3.0]
@@ -40,6 +42,16 @@ def _opts(dry, guard, tune=False, exciter=False):
     os.environ["BREKEM_GUARD"] = "1" if guard else "0"
     os.environ["BREKEM_TUNE"] = "1" if tune else "0"
     os.environ["BREKEM_EXCITER"] = "1" if exciter else "0"
+
+
+_GPU_SAID = []
+
+
+def _gpu(log):
+    """find the NVIDIA GPU once (every engine inherits the choice) and say what runs where."""
+    line = E.gpu_line()
+    if not _GPU_SAID:
+        _GPU_SAID.append(1); log(line)
 
 
 def _style_list(styles):
@@ -188,6 +200,7 @@ def master_one(audio, outdir, care=True, log=print, sep=None, shifts=1, variants
                dry=True, guard=True, tune=False, exciter=False):
     """variants: list of style ids (or True = all) -> <outdir>/VARIANTS."""
     E.apply_env()
+    _gpu(log)
     _opts(dry, guard, tune, exciter)
     if not E.have_refs():
         return _master_noref(audio, outdir, log, sep, shifts, variants)
@@ -296,6 +309,7 @@ def _stem_styles(pm, voxfile, outdir, styles, log):
 
 def stemmix(stemdir, voxfile, outdir, vox=-3.0, care=True, log=print, variants=None, dry=True, guard=True, tune=False, exciter=False):
     E.apply_env()
+    _gpu(log)
     _opts(dry, guard, tune, exciter)
     os.makedirs(outdir, exist_ok=True)
     pm = os.path.join(E.WORK, "sm_" + _safe_tag(voxfile))
@@ -362,6 +376,7 @@ def styles_only(path, outdir, variants=None, tune=False, dry=True, guard=True, s
     """Styles & Tune tab: any audio (file or folder) -> only the picked master styles
     and/or the tuned version (TUNED MIX + ACAPELLA TUNED). No MASTER/INSTRUMENTAL/APPLE."""
     E.apply_env()
+    _gpu(log)
     _opts(dry, guard, tune, exciter)
     ids = _style_list(variants)
     if not ids and not tune:
@@ -484,6 +499,7 @@ def distribute(audio, outdir, target_lufs=-9.5, tp=-1.0, split=True, clean=False
     No references, no tonal re-balancing. guard=True keeps each band's peaks inside the
     file's own range before the limiter; variants -> the picked master styles too."""
     E.apply_env()
+    _gpu(log)
     _opts(dry, guard, tune, exciter)
     os.makedirs(outdir, exist_ok=True)
     name = os.path.splitext(os.path.basename(audio))[0]
@@ -575,10 +591,13 @@ def _cli():
         p.add_argument("--no-dry-bass", action="store_true"); p.add_argument("--no-guard", action="store_true")
         p.add_argument("--tune", action="store_true", help="natural pitch correction of the vocal")
         p.add_argument("--exciter", action="store_true", help="harmonic exciter on the master")
+        p.add_argument("--cpu", action="store_true", help="don't use the NVIDIA GPU (GPU edition)")
     d.add_argument("--lufs", type=float, default=-9.5); d.add_argument("--tp", type=float, default=-1.0)
     d.add_argument("--no-split", action="store_true"); d.add_argument("--clean", action="store_true")
     d.add_argument("--sep", choices=SEP_MODELS, default=SEP_DEFAULT)
     ns = ap.parse_args()
+    if ns.cpu:
+        os.environ["BREKEM_GPU"] = "0"
     st = True if ns.styles.strip().lower() == "all" else [x.strip() for x in ns.styles.split(",") if x.strip()]
     kw = dict(variants=st, dry=not ns.no_dry_bass, guard=not ns.no_guard, tune=ns.tune, exciter=ns.exciter)
     if ns.cmd == "master":

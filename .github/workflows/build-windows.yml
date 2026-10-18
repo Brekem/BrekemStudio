@@ -1,6 +1,7 @@
 name: Build Windows installer
 
-# Builds, smoke-tests the frozen app and publishes the release "v<brekem_env.VERSION>" when:
+# Builds the CPU and the GPU (CUDA PyTorch) edition, smoke-tests each frozen app and
+# publishes both in the release "v<brekem_env.VERSION>" when:
 #   - a tag v* is pushed, or
 #   - a commit whose message contains [release] is pushed to a watched branch
 # A manual run (Actions tab -> Run workflow) builds + tests, installer as a workflow artifact.
@@ -19,7 +20,11 @@ jobs:
       github.event_name != 'push' || startsWith(github.ref, 'refs/tags/') ||
       contains(github.event.head_commit.message, '[release]')
     runs-on: windows-latest
-    timeout-minutes: 240
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor: [cpu, gpu]
     defaults:
       run:
         shell: pwsh
@@ -31,10 +36,20 @@ jobs:
           python-version: "3.10"
           cache: pip
 
+      - name: Disk space
+        run: Get-PSDrive -PSProvider FileSystem | Format-Table Name, @{n="FreeGB";e={[int]($_.Free/1GB)}}
+
       - name: Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          if ("${{ matrix.flavor }}" -eq "gpu") {   # CUDA 12.8 build: RTX 20 / 30 / 40 / 50, GTX 16
+            pip install --force-reinstall --no-deps torch==2.8.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu128
+            if ($LASTEXITCODE -ne 0) { throw "CUDA torch install failed" }
+          }
+          python -c "import torch, torchaudio; print('torch', torch.__version__, 'cuda', torch.version.cuda, 'torchaudio', torchaudio.__version__)"
+          $cu = python -c "import torch; print(torch.version.cuda)"
+          if (("${{ matrix.flavor }}" -eq "gpu") -ne ($cu -ne "None")) { throw "wrong torch build for ${{ matrix.flavor }}: cuda=$cu" }
 
       - name: FFmpeg (gyan.dev full build, GPL - has the soxr resampler)
         run: |
@@ -111,6 +126,8 @@ jobs:
           if (Select-String -Path smoke_ref.log -Pattern "Traceback|PermissionError|!! ERROR" -Quiet) {
             throw "reference-mode master raised an error (see the log above)"
           }
+          # no GPU on this runner: the GPU edition must say so and run everything on the CPU
+          if (-not (Select-String -Path smoke_ref.log -Pattern "GPU: not used" -Quiet)) { throw "no GPU line in the log" }
           foreach ($f in "MASTER.wav", "ACAPELLA.wav", "INSTRUMENTAL.wav") {
             if (-not (Test-Path "smoke_ref\$f")) { throw "reference-mode master did not produce $f" }
           }
@@ -122,40 +139,52 @@ jobs:
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
-          & $iscc build\installer.iss
+          & $iscc "/DFlavor=${{ matrix.flavor }}" build\installer.iss
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
-          Get-ChildItem dist\*.exe | Select-Object Name, @{n="MB";e={[int]($_.Length/1MB)}}
+          Get-ChildItem dist -File | Where-Object { $_.Extension -in ".exe", ".bin" } |
+            Select-Object Name, @{n="MB";e={[int]($_.Length/1MB)}}
 
-      - name: Split if over the 2 GB release-asset limit
+      - name: Release files (each under GitHub's 2 GB limit)
         run: |
-          $f = Get-ChildItem "dist\BREKEM STUDIO *Setup.exe" | Select-Object -First 1
           New-Item -ItemType Directory -Force release | Out-Null
-          if ($f.Length -lt 1.95GB) {
-            Copy-Item $f.FullName release\
-          } else {
-            & 7z a -v1900m "release\$($f.BaseName).7z" $f.FullName
+          $files = Get-ChildItem dist -File | Where-Object { $_.Name -like "BREKEM*Setup*" -and $_.Extension -in ".exe", ".bin" }
+          if (-not $files) { throw "no installer in dist" }
+          foreach ($f in $files) {
+            if ($f.Length -lt 1.95GB) { Copy-Item $f.FullName release\ }
+            else { & 7z a -v1900m "release\$($f.BaseName).7z" $f.FullName }
           }
           Get-ChildItem release | Select-Object Name, @{n="MB";e={[int]($_.Length/1MB)}}
 
       - uses: actions/upload-artifact@v4
         with:
-          name: brekem-studio-windows
+          name: brekem-studio-windows-${{ matrix.flavor }}
           path: release/*
           retention-days: 14
+          compression-level: 0
 
-      - name: GitHub Release
-        if: github.event_name == 'push'
+  publish:
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: brekem-studio-windows-*
+          path: release
+          merge-multiple: true
+
+      - name: GitHub Release (CPU + GPU edition)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $ver = (Select-String -Path brekem_env.py -Pattern 'VERSION = "(.+)"').Matches[0].Groups[1].Value
-          $tag = if ("${{ github.ref }}".StartsWith("refs/tags/")) { "${{ github.ref_name }}" } else { "v$ver" }
-          $files = Get-ChildItem release | ForEach-Object { $_.FullName }
-          gh release view $tag --repo "${{ github.repository }}" *> $null
-          if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag $files --clobber --repo "${{ github.repository }}"
-          } else {
-            gh release create $tag $files --repo "${{ github.repository }}" --target "${{ github.sha }}" `
+          ls -l release
+          ver=$(grep -oP 'VERSION = "\K[^"]+' brekem_env.py)
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then tag="$GITHUB_REF_NAME"; else tag="v$ver"; fi
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" release/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$tag" release/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
               --title "BREKEM STUDIO $tag" --notes-file build/RELEASE_NOTES.md
-          }
-          if ($LASTEXITCODE -ne 0) { throw "release failed" }
+          fi

@@ -57,19 +57,27 @@ r = run(["ffmpeg", "-hide_banner", "-y", "-i", SRCIN, "-af", f"volume=-{PAD_DB}d
 if not os.path.exists(src):
     print("ERROR: ffmpeg decode failed"); print(r.stderr[-800:]); sys.exit(2)
 
-def separate(model):
+# the NVIDIA GPU when the app found a usable one (brekem_env.gpu sets BREKEM_CUDA), else the CPU
+DEVICE = {"1": "cuda", "0": "cpu"}.get(os.environ.get("BREKEM_CUDA", ""))
+
+
+def separate(model, device=DEVICE):
     """-> {stem: wav path} or None. float32 output + headroom so the stems still add
     up to the song (the old int16 + per-stem 'rescale' broke that)."""
     sep = os.path.join(WORK, "sep_" + TAG)
     shutil.rmtree(sep, ignore_errors=True)
-    print(f"demucs {model}: separating all stems (this is the slow part)...", flush=True)
+    where = {"cuda": "on the GPU", "cpu": "on the CPU (this is the slow part)"}.get(device, "(this is the slow part)")
+    print(f"demucs {model}: separating all stems {where}...", flush=True)
     r = run([PYEXE, "-m", "demucs", "-n", model, "--float32", "--clip-mode", "clamp",
-             "--shifts", str(max(1, SHIFTS)), "--overlap", "0.25",
-             "--filename", "{stem}.{ext}", "-o", sep, src])
+             "--shifts", str(max(1, SHIFTS)), "--overlap", "0.25"] + (["-d", device] if device else []) +
+            ["--filename", "{stem}.{ext}", "-o", sep, src])
     got = {os.path.splitext(os.path.basename(p))[0]: p
            for p in glob.glob(os.path.join(sep, model, "*.wav"))}
     if "vocals" not in got or len(got) < 2:
         print(f"demucs {model} failed:"); print(r.stderr[-1200:])
+        if device == "cuda":                     # out of GPU memory / driver trouble -> same model on the CPU
+            print("GPU separation failed -> retrying on the CPU", flush=True)
+            return separate(model, "cpu")
         return None
     return got
 

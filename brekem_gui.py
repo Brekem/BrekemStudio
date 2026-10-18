@@ -80,6 +80,7 @@ class App(ttk.Frame):
         self.log(APP)
         self.log(f"user data   : {E.DATA}")
         self.log(f"references  : {E.REFS}")
+        threading.Thread(target=self._say_gpu, daemon=True).start()
         self._refresh_refs()
 
     # ---------- helpers ----------
@@ -105,6 +106,12 @@ class App(ttk.Frame):
         upd = lambda *_: b.configure(text=("[X] " if var.get() else "[  ] ") + label)
         var.trace_add("write", upd); upd()
         return b, var
+
+    def _say_gpu(self):
+        """find the NVIDIA GPU in the background (a few seconds) and say what runs where."""
+        line = E.gpu_line()
+        if not C._GPU_SAID:
+            C._GPU_SAID.append(1); self.log(line)
 
     def _opts_panel(self, f, row, styles=()):
         """styles (each its own [X]) + dry bass / band guard / tuning / exciter [X]; returns a getter."""
