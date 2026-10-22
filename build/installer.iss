@@ -4,7 +4,7 @@
 ; run from the project root, after PyInstaller
 
 #define AppName "BREKEM STUDIO"
-#define AppVer  "3.3.0"
+#define AppVer  "3.4.0"
 #define AppExe  "BrekemStudio.exe"
 ; project root = folder above this .iss
 #define Root AddBackslash(SourcePath) + ".."

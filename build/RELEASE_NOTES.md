@@ -1,11 +1,24 @@
-## BREKEM STUDIO 3.3.0
+## BREKEM STUDIO 3.4.0
 
 **Dos instaladores. Escoge uno:**
 
 - **Tienes tarjeta NVIDIA (GTX 16, RTX 20 / 30 / 40 / 50): edición GPU.** Descarga
-  `BREKEM.STUDIO.3.3.0.GPU.Setup.exe` **y todos los archivos `.bin`** que tienen el mismo
+  `BREKEM.STUDIO.3.4.0.GPU.Setup.exe` **y todos los archivos `.bin`** que tienen el mismo
   nombre, en una carpeta vacía. Abre el `.exe`: él solo usa los `.bin`.
-- **No tienes NVIDIA: edición normal.** Descarga `BREKEM.STUDIO.3.3.0.Setup.exe`.
+- **No tienes NVIDIA: edición normal.** Descarga `BREKEM.STUDIO.3.4.0.Setup.exe`.
+
+### Nuevo en 3.4: mucho más rápido, mismo sonido
+- **Máster con referencias**: los intentos y la búsqueda del 6/6 son los mismos. Lo que sale
+  igual en cada intento (afinación, limpieza de voz, beat, matchering, exciter, INSTRUMENTAL,
+  ACAPELLA) se hace **una sola vez** por canción; los demás intentos solo prueban el tono.
+- **Matchering**: las referencias se procesan **todas a la vez**, una por núcleo del CPU.
+- **Lote**: mientras una canción se masteriza en el CPU, la tarjeta NVIDIA ya va **separando
+  la próxima**.
+- **Estilos de máster**: varios a la vez (uno por cada dos hilos del CPU).
+- FLAC y MP3 se codifican a la vez.
+- **Continuar donde te quedaste** (Lote, Distribuir carpeta, Estilos carpeta): las canciones
+  que ya están terminadas en la carpeta de salida se **saltan**. Las que quedaron a medias se
+  hacen otra vez. Para rehacer una canción, borra su carpeta.
 
 Todo viene dentro del instalador y funciona sin internet: Python y todas las librerías,
 FFmpeg, Praat y todos los modelos de IA (Demucs `htdemucs_ft`, `htdemucs_6s` y `htdemucs`,

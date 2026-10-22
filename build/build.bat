@@ -35,7 +35,7 @@ if defined ISCC (
   echo.
   echo ==== Inno Setup ====
   "%ISCC%" /DFlavor=%FLAVOR% build\installer.iss || exit /b 1
-  echo Installer in dist\  ^(GPU edition: BREKEM.STUDIO.3.3.0.GPU.Setup.exe + its .bin parts^)
+  echo Installer in dist\  ^(GPU edition: BREKEM.STUDIO.3.4.0.GPU.Setup.exe + its .bin parts^)
 ) else (
   echo Inno Setup not found - skipping installer. Zip dist\BrekemStudio\ instead,
   echo or: winget install JRSoftware.InnoSetup  then re-run this script.

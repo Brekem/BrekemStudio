@@ -59,6 +59,14 @@ if not os.path.exists(src):
 
 # the NVIDIA GPU when the app found a usable one (brekem_env.gpu sets BREKEM_CUDA), else the CPU
 DEVICE = {"1": "cuda", "0": "cpu"}.get(os.environ.get("BREKEM_CUDA", ""))
+# set for the batch's look-ahead separation of the next song: GPU or nothing (it must not
+# take the CPU from the song being mastered); the song's own turn does the fallbacks
+GPU_ONLY = os.environ.get("BREKEM_SEP_GPU_ONLY") == "1"
+if GPU_ONLY and DEVICE != "cuda":
+    try: os.remove(src)
+    except Exception: pass
+    print("no GPU -> this song is separated when its turn comes", flush=True)
+    sys.exit(5)
 
 
 def separate(model, device=DEVICE):
@@ -75,6 +83,12 @@ def separate(model, device=DEVICE):
            for p in glob.glob(os.path.join(sep, model, "*.wav"))}
     if "vocals" not in got or len(got) < 2:
         print(f"demucs {model} failed:"); print(r.stderr[-1200:])
+        if device == "cuda" and GPU_ONLY:        # a prefetch while the GPU is busy: try again later
+            print("GPU busy -> this song is separated when its turn comes", flush=True)
+            shutil.rmtree(sep, ignore_errors=True)
+            try: os.remove(src)
+            except Exception: pass
+            sys.exit(5)
         if device == "cuda":                     # out of GPU memory / driver trouble -> same model on the CPU
             print("GPU separation failed -> retrying on the CPU", flush=True)
             return separate(model, "cpu")

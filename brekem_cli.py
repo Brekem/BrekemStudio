@@ -22,7 +22,7 @@ STYLE OPTS (every command): --styles cd,clarity,espacial,punch,warm,club,streami
   brekem_cli.py styles "<audio|folder>" "<outdir>" --styles clarity,punch [--tune]   (only those, any audio)
 MODEL (stem separation): htdemucs_ft (default, 4 stems, best) | htdemucs_6s (6 stems) | htdemucs (fast)
 """
-import os, re, sys, glob, shutil, argparse
+import os, re, sys, glob, shutil, argparse, threading
 import brekem_env as E
 
 AUDIO_EXT = (".wav", ".flac", ".mp3", ".m4a", ".aif", ".aiff", ".ogg", ".wma")
@@ -134,10 +134,10 @@ def _refine(par, d):
     return round(sh, 2), round(air, 2), round(pr, 2)
 
 
-def _prep(audio, tag, sep, shifts, log):
+def _prep(audio, tag, sep, shifts, log, env=None):
     """separate into all the stems the model gives (cached per song + model)."""
     return E.run_engine("prep.py", [os.path.abspath(audio), tag, sep or SEP_DEFAULT, str(max(1, int(shifts)))],
-                        on_line=lambda s: log("  " + s))
+                        on_line=lambda s: log("  " + s), env=env)
 
 
 def _variants(tag, outdir, log, styles=True):
@@ -157,15 +157,23 @@ def _encode_extras(folder, log):
     import subprocess
     ff = E.FFMPEG
     cf = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    for kind in ("MASTER", "APPLE DIGITAL MASTER"):
+    ps = []        # all four encodes at once (one core each); each file gets its real name only
+    for kind in ("MASTER", "APPLE DIGITAL MASTER"):        # once complete (_done_master trusts that)
         src = os.path.join(folder, kind + ".wav")
         if not os.path.exists(src):
             continue
         base = os.path.join(folder, kind)
-        subprocess.run([ff, "-v", "error", "-y", "-i", src, "-c:a", "flac",
-                        "-compression_level", "8", base + ".flac"], creationflags=cf)
-        subprocess.run([ff, "-v", "error", "-y", "-i", src, "-c:a", "libmp3lame",
-                        "-b:a", "320k", "-id3v2_version", "3", base + ".mp3"], creationflags=cf)
+        for ext, codec in ((".flac", ["-c:a", "flac", "-compression_level", "8", "-f", "flac"]),
+                           (".mp3", ["-c:a", "libmp3lame", "-b:a", "320k", "-id3v2_version", "3", "-f", "mp3"])):
+            part = base + ext + ".part"
+            ps.append((part, base + ext, subprocess.Popen([ff, "-v", "error", "-y", "-i", src] + codec + [part],
+                                                          creationflags=cf)))
+    for part, final, p in ps:
+        if p.wait() == 0 and os.path.exists(part):
+            os.replace(part, final)
+        else:
+            try: os.remove(part)
+            except OSError: pass
     log("  + FLAC/MP3 (MASTER, APPLE DIGITAL MASTER)")
 
 
@@ -213,6 +221,19 @@ def master_one(audio, outdir, care=True, log=print, sep=None, shifts=1, variants
     name = tag + " master.wav"
     os.makedirs(outdir, exist_ok=True)
     stage = os.path.join(E.WORK, "stage_" + tag)
+    # what every attempt computes the same (vocal chain, beat, matchering...) is kept here by
+    # attempt 1 and reused by the others - fresh for each song and each set of options
+    cache = os.path.join(E.WORK, "tvcache_" + tag)
+    shutil.rmtree(cache, ignore_errors=True)
+    os.environ["BREKEM_TV_CACHE"] = cache
+    try:
+        return _master_attempts(audio, outdir, care, log, variants, tag, name, stage)
+    finally:
+        os.environ.pop("BREKEM_TV_CACHE", None)
+        shutil.rmtree(cache, ignore_errors=True)
+
+
+def _master_attempts(audio, outdir, care, log, variants, tag, name, stage):
     attempts = 6 if care else 3
     sh, air, nar, pr, wd = 1.5, 0.0, 0.0, 0.0, 0.0
     best = None
@@ -267,17 +288,92 @@ def master_one(audio, outdir, care=True, log=print, sep=None, shifts=1, variants
     return {"ok": bok, "tonal": _tonal(bd), "params": bpar, "outdir": outdir}
 
 
+# ------------------------------------------------------------------ folders: resume + prefetch
+def _song_dir(outroot, i, name):
+    """the song's output folder: the one an earlier run made for it ("NN - name", whatever
+    its number), else a new "NN - name"."""
+    try:
+        for d in sorted(os.listdir(outroot)):
+            m = re.match(r"^\d+ - (.*)$", d)
+            if m and m.group(1) == name and os.path.isdir(os.path.join(outroot, d)):
+                return os.path.join(outroot, d)
+    except OSError:
+        pass
+    return os.path.join(outroot, f"{i:02d} - {name}")
+
+
+def _done_master(od, variants):
+    """finished = both MP3s encoded (they only get their name once complete) + COMPARE.html,
+    the styles' last file, when styles were asked. A song cut off half way is made again."""
+    if not all(os.path.exists(os.path.join(od, k + ".mp3")) for k in ("MASTER", "APPLE DIGITAL MASTER")):
+        return False
+    return not _style_list(variants) or os.path.exists(os.path.join(od, "VARIANTS", "COMPARE.html"))
+
+
+def _done_styles(od, variants, tune):
+    need = (["VARIANTS/COMPARE.html"] if _style_list(variants) else []) + (["ACAPELLA TUNED.wav"] if tune else [])
+    return all(os.path.exists(os.path.join(od, p)) for p in need)
+
+
+def _folder_jobs(files, outroot, is_done, log):
+    """[(file, its output folder)] still to make; songs already finished there are skipped
+    (delete a song's folder to make it again)."""
+    jobs, skip = [], []
+    for i, f in enumerate(files, 1):
+        name = os.path.splitext(os.path.basename(f))[0]
+        od = _song_dir(outroot, i, name)
+        (skip if is_done(od) else jobs).append((f, od))
+    for f, od in skip:
+        log(f"  already done, skipped: {os.path.basename(od)}   (delete that folder to make it again)")
+    if skip:
+        log(f"  {len(skip)} already done, {len(jobs)} to go")
+    return jobs
+
+
+class _Prefetch:
+    """separates the NEXT song's stems (Demucs, on the GPU) while this song is mastered on the
+    CPU, so separation and mastering overlap instead of waiting for each other."""
+
+    def __init__(self, sep, shifts, log):
+        self.sep, self.shifts, self.log, self.th = sep, shifts, log, {}
+
+    def start(self, audio):
+        tag = _safe_tag(audio)
+        if tag in self.th:
+            return
+        lg = lambda s: self.log(f"  [next: {tag}] " + s.strip())
+        # GPU only: if the card is busy/full now, don't grind it on the CPU next to the master -
+        # ready() separates it on the GPU once this song is done
+        t = threading.Thread(target=lambda: _prep(audio, tag, self.sep, self.shifts, lg,
+                                                  env={"BREKEM_SEP_GPU_ONLY": "1"}), daemon=True)
+        t.start()
+        self.th[tag] = t
+
+    def ready(self, audio):
+        """wait until this song's stems are cached (its own separation then is a cache hit)."""
+        t = self.th.pop(_safe_tag(audio), None)
+        if t:
+            t.join()
+        return _prep(audio, _safe_tag(audio), self.sep, self.shifts, lambda s: self.log("  " + s))
+
+
 def batch(folder, outroot, care=True, log=print, sep=None, shifts=1, variants=None,
           dry=True, guard=True, tune=False, exciter=False):
     files = sorted({p for e in AUDIO_EXT for p in glob.glob(os.path.join(folder, "*" + e))})
     if not files:
         log("!! No audio in the folder."); return
     log(f"=== BATCH: {len(files)} songs ===")
+    E.apply_env()
+    _gpu(log)
+    jobs = _folder_jobs(files, outroot, lambda od: _done_master(od, variants), log)
+    pf = _Prefetch(sep, shifts, log)
     res = []
-    for i, f in enumerate(files, 1):
+    for i, (f, od) in enumerate(jobs, 1):
         name = os.path.splitext(os.path.basename(f))[0]
-        od = os.path.join(outroot, f"{i:02d} - {name}")
-        log(f"\n----- [{i}/{len(files)}] {name} -----")
+        log(f"\n----- [{i}/{len(jobs)}] {name} -----")
+        pf.ready(f)
+        if i < len(jobs):
+            pf.start(jobs[i][0])
         r = master_one(f, od, care=care, log=log, sep=sep, shifts=shifts, variants=variants,
                        dry=dry, guard=guard, tune=tune, exciter=exciter)
         res.append((name, r.get("ok", -1)))
@@ -385,15 +481,18 @@ def styles_only(path, outdir, variants=None, tune=False, dry=True, guard=True, s
         files = sorted({p for e in AUDIO_EXT for p in glob.glob(os.path.join(path, "*" + e))})
         if not files:
             log("!! No audio in the folder."); return
-        jobs = [(f, os.path.join(outdir, f"{i:02d} - {os.path.splitext(os.path.basename(f))[0]}"))
-                for i, f in enumerate(files, 1)]
+        jobs = _folder_jobs(files, outdir, lambda od: _done_styles(od, ids, tune), log)
     else:
         jobs = [(path, outdir)]
+    pf = _Prefetch(sep, 1, log)
     for i, (f, od) in enumerate(jobs, 1):
         log(f"\n=== [{i}/{len(jobs)}] {os.path.basename(f)}  "
             f"({', '.join(ids) or 'no styles'}{' + pitch correction' if tune else ''})")
         tag = _safe_tag(f)
-        if _prep(f, tag, sep, 1, log) != 0:
+        rc = pf.ready(f)
+        if i < len(jobs):
+            pf.start(jobs[i][0])
+        if rc != 0:
             log("!! Separation failed."); continue
         os.makedirs(od, exist_ok=True)
         if tune:
@@ -566,10 +665,18 @@ def distribute_batch(folder, outroot, target_lufs=-9.5, tp=-1.0, split=True, cle
     if not files:
         log("!! No audio in the folder."); return
     log(f"=== {'AI CLEAN + ' if clean else ''}DISTRIBUTE BATCH: {len(files)} files ===")
-    for i, f in enumerate(files, 1):
+    E.apply_env()
+    _gpu(log)
+    # _INFO.txt is the last file distribute() writes
+    jobs = _folder_jobs(files, outroot, lambda od: os.path.exists(os.path.join(od, "_INFO.txt")), log)
+    pf = _Prefetch(sep, 1, log) if (split or clean or _style_list(variants)) else None
+    for i, (f, od) in enumerate(jobs, 1):
         name = os.path.splitext(os.path.basename(f))[0]
-        od = os.path.join(outroot, f"{i:02d} - {name}")
-        log(f"\n--- [{i}/{len(files)}] {name} ---")
+        log(f"\n--- [{i}/{len(jobs)}] {name} ---")
+        if pf:
+            pf.ready(f)
+            if i < len(jobs):
+                pf.start(jobs[i][0])
         distribute(f, od, target_lufs=target_lufs, tp=tp, split=split, clean=clean, log=log, sep=sep,
                    variants=variants, dry=dry, guard=guard, tune=tune, exciter=exciter)
 

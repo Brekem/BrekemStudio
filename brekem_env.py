@@ -10,7 +10,7 @@ import glob
 import subprocess
 import threading
 
-VERSION = "3.3.0"
+VERSION = "3.4.0"
 FROZEN = getattr(sys, "frozen", False)
 
 def _res_root():
@@ -188,9 +188,11 @@ def refs_list():
 def have_refs():
     return len(refs_list()) >= 2
 
-def run_engine(script, args, on_line=None, cwd=None):
-    """Launch engine/<script> with args. Streams stdout lines to on_line(str).
-    Returns exit code. Works from source (child python) and frozen (multi-call exe)."""
+def run_engine(script, args, on_line=None, cwd=None, env=None):
+    """Launch engine/<script> with args. Streams stdout lines to on_line(str); env: extra
+    variables for this child only. Returns exit code. Works from source (child python) and
+    frozen (multi-call exe)."""
+    extra = env or {}
     apply_env()
     spath = os.path.join(ENGINE, script)
     exe = sys.executable
@@ -200,7 +202,7 @@ def run_engine(script, args, on_line=None, cwd=None):
             exe = cli
             os.environ["BREKEM_PY"] = cli    # engines spawn demucs etc. through it too
     cmd = [exe, spath] + [str(a) for a in args]
-    env = dict(os.environ)
+    env = dict(os.environ, **extra)
     # engine output is UTF-8 both ways: a reference or song named with symbols the Windows
     # console code page can't show (e.g. U+29F9) used to crash the engine's print()
     env["PYTHONIOENCODING"] = "utf-8"
