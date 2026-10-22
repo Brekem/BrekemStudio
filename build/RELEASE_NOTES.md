@@ -11,6 +11,9 @@
 - **Máster con referencias**: los intentos y la búsqueda del 6/6 son los mismos. Lo que sale
   igual en cada intento (afinación, limpieza de voz, beat, matchering, exciter, INSTRUMENTAL,
   ACAPELLA) se hace **una sola vez** por canción; los demás intentos solo prueban el tono.
+- **Más canciones llegan a 6/6**: si la búsqueda normal se atasca en 5/6 porque un ajuste
+  llegó a su tope (por ejemplo el aire a -8 dB), sigue con un rango más amplio y hasta 6
+  intentos más. Las canciones que ya llegaban a 6/6 salen exactamente igual.
 - **Matchering**: las referencias se procesan **todas a la vez**, una por núcleo del CPU.
 - **Lote**: mientras una canción se masteriza en el CPU, la tarjeta NVIDIA ya va **separando
   la próxima**.

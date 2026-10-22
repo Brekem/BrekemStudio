@@ -81,13 +81,23 @@ def _parse(out):
     return ok, d, verd
 
 
-def _next_params(sh, air, nar, pr, wd, d, verd):
+# how far the search may push each tone setting (dB): low shelf, air shelf, presence.
+# NORMAL is the search as it always was. A song that hits an edge there and still misses
+# that axis used to stop at 5/6 ("no new params"); only then the search goes on with WIDE
+# edges (and extra attempts - cheap now that the heavy part is reused). So every song that
+# reached 6/6 before follows exactly the same path and gets exactly the same master.
+LIMITS_NORMAL = dict(low=(-6.0, 6.0), air=(-8.0, 2.0), pres=(-6.0, 3.0))
+LIMITS_WIDE = dict(low=(-9.0, 9.0), air=(-14.0, 2.0), pres=(-9.0, 3.0))
+EXTRA_ATTEMPTS = 6
+
+
+def _next_params(sh, air, nar, pr, wd, d, verd, lim=LIMITS_NORMAL):
     if verd.get("low") is False and "low" in d:
-        sh = max(-6.0, min(6.0, sh - 1.9 * d["low"]))
+        sh = max(lim["low"][0], min(lim["low"][1], sh - 1.9 * d["low"]))
     if verd.get("air") is False and "air" in d:
-        air = max(-8.0, min(2.0, air - 2.0 * d["air"]))
+        air = max(lim["air"][0], min(lim["air"][1], air - 2.0 * d["air"]))
     if verd.get("pres") is False and "pres" in d:
-        pr = max(-6.0, min(3.0, pr - 1.7 * d["pres"]))
+        pr = max(lim["pres"][0], min(lim["pres"][1], pr - 1.7 * d["pres"]))
     if verd.get("stereo") is False:
         c = d.get("corr", 0.0)
         if c >= 0.025:
@@ -119,18 +129,18 @@ def _snapshot(stage):
     return snap
 
 
-def _refine(par, d):
+def _refine(par, d, lim=LIMITS_NORMAL):
     sh, air, nar, pr, wd = par
     picks = sorted((abs(d[a]), a) for a in ("low", "pres", "air") if a in d and abs(d[a]) >= 1.2)
     if not picks:
         return None
     ax = picks[-1][1]
     if ax == "low":
-        sh = max(-6.0, min(6.0, sh - 1.4 * d["low"]))
+        sh = max(lim["low"][0], min(lim["low"][1], sh - 1.4 * d["low"]))
     elif ax == "air":
-        air = max(-8.0, min(2.0, air - 1.5 * d["air"]))
+        air = max(lim["air"][0], min(lim["air"][1], air - 1.5 * d["air"]))
     else:
-        pr = max(-6.0, min(3.0, pr - 1.4 * d["pres"]))
+        pr = max(lim["pres"][0], min(lim["pres"][1], pr - 1.4 * d["pres"]))
     return round(sh, 2), round(air, 2), round(pr, 2)
 
 
@@ -238,7 +248,15 @@ def _master_attempts(audio, outdir, care, log, variants, tag, name, stage):
     sh, air, nar, pr, wd = 1.5, 0.0, 0.0, 0.0, 0.0
     best = None
     seen = set()
-    for i in range(1, attempts + 1):
+    lim, i = LIMITS_NORMAL, 0
+
+    def widen(why):
+        nonlocal lim, attempts
+        lim, attempts = LIMITS_WIDE, attempts + EXTRA_ATTEMPTS
+        log(f"  {why} -> going on with a wider tone range (up to {attempts} attempts)")
+
+    while i < attempts:
+        i += 1
         shutil.rmtree(stage, ignore_errors=True); os.makedirs(stage, exist_ok=True)
         out = []
         E.run_engine("track_v2.py",
@@ -252,13 +270,19 @@ def _master_attempts(audio, outdir, care, log, variants, tag, name, stage):
         if ok >= 6 and have4:
             break
         seen.add((sh, air, nar, pr, wd))
-        sh, air, nar, pr, wd = _next_params(sh, air, nar, pr, wd, d, verd)
-        if (sh, air, nar, pr, wd) in seen:
+        nxt = _next_params(sh, air, nar, pr, wd, d, verd, lim)
+        if nxt in seen and lim is LIMITS_NORMAL:
+            widen("not 6/6 and stuck at the edge of the usual range")
+            nxt = _next_params(sh, air, nar, pr, wd, d, verd, lim)
+        if nxt in seen:
             log("  no new params -> stop"); break
+        sh, air, nar, pr, wd = nxt
+        if i == attempts and lim is LIMITS_NORMAL:
+            widen("not 6/6 after the usual attempts")
 
     bok, bpar, bsnap, bd = best
     if care and bok >= 6 and _tonal(bd) >= 1.2:
-        rp = _refine(bpar, bd)
+        rp = _refine(bpar, bd, lim)
         if rp:
             sh2, air2, pr2 = rp
             shutil.rmtree(stage, ignore_errors=True); os.makedirs(stage, exist_ok=True)
