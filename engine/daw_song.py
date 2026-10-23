@@ -27,6 +27,7 @@ from acap_pro import (SR, load, rms, run, ebur, bands_arr, vbus, glue, polish,
                       bbmatch, kweight, WORK, debreath_at, eq_sub, plate, loud_to,
                       bq_shelf, bq_peak)
 import matchering as mg
+import exciter as EX
 try: mg.log(info_handler=lambda *a, **k: None, warning_handler=lambda *a, **k: None)
 except Exception: pass
 
@@ -217,6 +218,7 @@ pk = np.max(np.abs(mix)); mix = mix*(0.99/pk) if pk > 0.99 else mix
 pB = libmaster(w(os.path.join(WORK, "ds_m0.wav"), mix), os.path.join(WORK, "ds_m1.wav"))
 y = bbmatch(load(pB)); pk = np.max(np.abs(y)); y = y*(0.995/pk) if pk > 0.995 else y
 y = matchering_avg(w(os.path.join(WORK, "ds_m2.wav"), y), "ds")
+if EX.enabled(): y = EX.excite(y, log=L)
 y = bq_shelf(y, 75.0, SHELF_DB, False)
 if AIR_DB != 0.0:  y = bq_shelf(y, 9000.0, AIR_DB, True)
 if PRES_DB != 0.0: y = bq_peak(y, 3500.0, PRES_DB, 0.7)
@@ -233,6 +235,7 @@ inst2 = glue(inst2)
 pk = np.max(np.abs(inst2)); inst2 = inst2*(0.99/pk) if pk > 0.99 else inst2
 pB = libmaster(w(os.path.join(WORK, "ds_i0.wav"), inst2), os.path.join(WORK, "ds_i1.wav"))
 y = polish(load(pB))
+if EX.enabled(): y = EX.excite(y, log=L)
 y = bq_shelf(y, 75.0, SHELF_DB, False)
 y = np.tanh(y*1.6)/np.tanh(1.6)
 pk = np.max(np.abs(y)); y = y*(0.995/pk) if pk > 0.995 else y

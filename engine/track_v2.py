@@ -31,6 +31,7 @@ from acap_pro import (SR, load, rms, run, ebur, bands_arr, deepfilter, vbus, glu
 import re, matchering as mg
 import stems as ST
 import tune as TU
+import exciter as EX
 try:
     mg.log(info_handler=lambda *a, **k: None, warning_handler=lambda *a, **k: None)
 except Exception:
@@ -140,12 +141,26 @@ def widen_highs(x, f=9000.0, amount=1.30):
     return np.stack([mid+side2, mid-side2], 1)
 
 def matchering_avg(premaster_wav, tag):
+    """one matchering per reference, all at once (one child process each -> every core works),
+    averaged in the references' order."""
+    import subprocess
+    cf = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+    env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+    jobs = []
+    for i, (nm, rp) in enumerate(REFS.items()):
+        op = os.path.join(WORK, f"{tag}_mg_{i}.wav")
+        try: os.remove(op)
+        except Exception: pass
+        p = subprocess.Popen([_PYEXE, os.path.join(_HOME, "mg_one.py"), premaster_wav, rp, op],
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                             encoding="utf-8", errors="replace", env=env, creationflags=cf)
+        jobs.append((nm, op, p))
     outs = []
-    for nm, rp in REFS.items():
-        op = os.path.join(WORK, f"{tag}_mg_{nm}.wav")
+    for nm, op, p in jobs:
+        msg = p.communicate()[0]
         try:
-            mg.process(target=premaster_wav, reference=rp, results=[mg.pcm24(op)])
-            if os.path.exists(op): outs.append(load(op))
+            if p.returncode == 0 and os.path.exists(op): outs.append(load(op))
+            else: L(f"    matchering {nm} FALLO: {msg.strip()[-300:]}")
         except Exception as e:
             L(f"    matchering {nm} FALLO: {e}")
         finally:
@@ -157,42 +172,120 @@ def matchering_avg(premaster_wav, tag):
     L(f"    matchering: averaged {len(outs)}/{len(REFS)} refs")
     return np.mean([a[:m] for a in outs], axis=0)
 
-# ================== VOCAL PRO ==================
-L(f"=== track_v2: {NAME}  (tag={TAG}) ===")
-if not (os.path.exists(VC) and os.path.exists(IC)):
-    L("NO STEMS -> abort"); sys.exit(1)
-voc = load(VC); n = len(voc); r0 = rms(voc)
-RAW = voc.copy()
-VACT = ST.vocal_activity(RAW, load(IC))               # where the vocal stem really holds a vocal
-if TU.enabled():                                  # natural pitch correction (whole notes, vibrato kept)
-    RAW = TU.tuned_vocal(os.path.join(STEMS, TAG), RAW, load(IC), VACT, log=L)
-    voc = RAW.copy(); r0 = rms(voc)
-voc = deepfilter(voc, n)
-voc, nb  = debreath_at(voc, n, at_db=-9.0)
-voc, npl = deplosive_gated(voc, n)
-voc = dereverb(voc)
-voc = eq_sub(voc)
-voc = vbus(voc)
-VOX = voc.copy()
-sf.write(os.path.join(STEMS, TAG, TU.proc_cache()), VOX.astype(np.float32), SR, subtype="FLOAT")   # reused by variants.py
-L(f"vocal pro: breath={nb} plos={npl}")
+
+def profile(p):
+    I, Lr, T = ebur(p); lo, pr, air, corr = bands_arr(load(p))
+    return dict(I=I, LRA=Lr, TP=T, low=lo, pres=pr, air=air, corr=corr)
 
 def w(tmp, arr): sf.write(tmp, arr.astype(np.float32), SR, subtype="PCM_24"); return tmp
 
 from acap_pro import bq_shelf   # shelf de graves fijo post-matchering
 from acap_pro import bq_peak    # peak de presencia opcional (argv[7])
+import json, pickle, shutil
 
-# 1) MASTER
+# The orchestrator re-runs this script with new tone settings (argv[4..8]) until the verdict
+# is 6/6. Everything before those settings - vocal chain, tuning, beat, matchering, exciter,
+# INSTRUMENTAL, ACAPELLA, the references' profiles - comes out identical on every attempt:
+# attempt 1 keeps it in BREKEM_TV_CACHE and the next attempts start from there.
+CACHE = os.environ.get("BREKEM_TV_CACHE") or ""
+def _c(f): return os.path.join(CACHE, f)
+HIT = bool(CACHE) and all(os.path.exists(_c(f)) for f in
+                          ("meta.json", "y_pre.npy", "INSTRUMENTAL.wav", "ACAPELLA.wav"))
+
+L(f"=== track_v2: {NAME}  (tag={TAG}) ===")
+if not (os.path.exists(VC) and os.path.exists(IC)):
+    L("NO STEMS -> abort"); sys.exit(1)
+
 oM = os.path.join(OUT, PFX + "MASTER.wav")
-inst = ST.instrumental(TAG, transient_shape, VACT, log=L)
-vmix = ST.gate(VOX*(r0/rms(VOX))*10**(1.0/20), VACT)
-vmix = 0.6*plate(vmix) + 0.4*vmix + ST.bleed(RAW, VACT)
-mm = min(len(vmix), len(inst)); mix = glue(vmix[:mm] + inst[:mm])
-mix = polish(mix); mix = dyn_eq(mix); mix = tape_sat(mix, wet=0.16); mix = widen_highs(mix, 9000, 1.30)
-pk = np.max(np.abs(mix)); mix = mix*(0.99/pk) if pk > 0.99 else mix
-pB = libmaster(w(os.path.join(WORK, "tv_m0.wav"), mix), os.path.join(WORK, "tv_m1.wav"))
-y = bbmatch(load(pB)); pk = np.max(np.abs(y)); y = y*(0.995/pk) if pk > 0.995 else y
-y = matchering_avg(w(os.path.join(WORK, "tv_m2.wav"), y), "tv")
+oI = os.path.join(OUT, PFX + "INSTRUMENTAL.wav")
+oA = os.path.join(OUT, PFX + "ACAPELLA.wav")
+
+
+def heavy():
+    """-> (y = premaster after matchering + exciter, guard reference or None, loudness target);
+    also writes INSTRUMENTAL + ACAPELLA."""
+    # ================== VOCAL PRO ==================
+    voc = load(VC); n = len(voc); r0 = rms(voc)
+    RAW = voc.copy()
+    VACT = ST.vocal_activity(RAW, load(IC))               # where the vocal stem really holds a vocal
+    if TU.enabled():                                  # natural pitch correction (whole notes, vibrato kept)
+        RAW = TU.tuned_vocal(os.path.join(STEMS, TAG), RAW, load(IC), VACT, log=L)
+        voc = RAW.copy(); r0 = rms(voc)
+    voc = deepfilter(voc, n)
+    voc, nb  = debreath_at(voc, n, at_db=-9.0)
+    voc, npl = deplosive_gated(voc, n)
+    voc = dereverb(voc)
+    voc = eq_sub(voc)
+    voc = vbus(voc)
+    VOX = voc.copy()
+    sf.write(os.path.join(STEMS, TAG, TU.proc_cache()), VOX.astype(np.float32), SR, subtype="FLOAT")   # reused by variants.py
+    L(f"vocal pro: breath={nb} plos={npl}")
+
+    # loudness follows the references: at least as loud as the quietest one (the verdict's
+    # "loudness >= ref min"), never quieter than -9.3, never past -7.0 (no crushed master)
+    _ri = [i for i in (ebur(p)[0] for p in REFS.values()) if i is not None]
+    ITGT = float(np.clip(min(_ri) - 0.2, -9.3, -7.0)) if _ri else -9.3
+    if ITGT > -9.3: L(f"loudness target {ITGT:.1f} LUFS (quietest reference {min(_ri):.1f})")
+
+    # 1) MASTER, up to the tone settings
+    inst = ST.instrumental(TAG, transient_shape, VACT, log=L)
+    vmix = ST.gate(VOX*(r0/rms(VOX))*10**(1.0/20), VACT)
+    vmix = 0.6*plate(vmix) + 0.4*vmix + ST.bleed(RAW, VACT)
+    mm = min(len(vmix), len(inst)); mix = glue(vmix[:mm] + inst[:mm])
+    mix = polish(mix); mix = dyn_eq(mix); mix = tape_sat(mix, wet=0.16); mix = widen_highs(mix, 9000, 1.30)
+    pk = np.max(np.abs(mix)); mix = mix*(0.99/pk) if pk > 0.99 else mix
+    pB = libmaster(w(os.path.join(WORK, "tv_m0.wav"), mix), os.path.join(WORK, "tv_m1.wav"))
+    y = bbmatch(load(pB)); pk = np.max(np.abs(y)); y = y*(0.995/pk) if pk > 0.995 else y
+    y = matchering_avg(w(os.path.join(WORK, "tv_m2.wav"), y), "tv")
+    if EX.enabled(): y = EX.excite(y, log=L)    # harmonics before the tone moves, so the verdict loop sees them
+    # reference mode: the references set the tone, so the guard only limits band PEAKS on the master.
+    # (holding the tone to the original song undid the matching: a -8 dB air cut came back +3 dB)
+    gref = ST.guard_ref(ST._fit(RAW, len(y)) + ST._fit(load(IC), len(y))) if ST.guard_enabled() else None
+
+    # 2) INSTRUMENTAL
+    inst = glue(ST.instrumental(TAG, lambda x: transient_shape(x, boost_db=2.5), log=L))   # menos boost -> menos crest
+    pk = np.max(np.abs(inst)); inst = inst*(0.99/pk) if pk > 0.99 else inst
+    pB = libmaster(w(os.path.join(WORK, "tv_i0.wav"), inst), os.path.join(WORK, "tv_i1.wav"))
+    yi = mono_narrow(polish(load(pB)), 0.82)                # estrecha ANTES de limitar -> mas headroom
+    if EX.enabled(): yi = EX.excite(yi, log=L)
+    yi = bq_shelf(yi, 75.0, SHELF_DB, False)                # mismo shelf de graves que el master
+    if ST.guard_enabled():
+        yi = ST.guard(yi, ST._fit(load(IC), len(yi)), tone_tol_db=99.0, log=L)   # peaks only (see MASTER)
+    yi = np.tanh(yi*1.6)/np.tanh(1.6)                       # soft-clip suave: raspa picos, sube RMS alcanzable
+    pk = np.max(np.abs(yi)); yi = yi*(0.995/pk) if pk > 0.995 else yi
+    loud_to(w(os.path.join(WORK, "tv_i2.wav"), yi), oI, Itgt=ITGT, tp_lin=0.871, drive=0.87)
+
+    # 3) ACAPELLA
+    va = plate(ST.gate(VOX, VACT)); rr = rms(va); va = va*(r0/rr) if rr > 0 else va
+    pk = np.max(np.abs(va)); va = va*(0.98/pk) if pk > 0.98 else va
+    loud_to(w(os.path.join(WORK, "tv_a0.wav"), va), oA, Itgt=-12.0, tp_lin=0.891, drive=0.89)
+    return y, gref, ITGT
+
+
+if HIT:
+    with open(_c("meta.json"), encoding="utf-8") as f:
+        META = json.load(f)
+    ITGT = META["ITGT"]
+    y = np.load(_c("y_pre.npy"))
+    GREF = None
+    if os.path.exists(_c("gref.pkl")):
+        with open(_c("gref.pkl"), "rb") as f:
+            GREF = pickle.load(f)
+    shutil.copy2(_c("INSTRUMENTAL.wav"), oI); shutil.copy2(_c("ACAPELLA.wav"), oA)
+    L("vocal chain, beat, matchering, INSTRUMENTAL and ACAPELLA reused from the first attempt "
+      "(only the tone settings change)")
+else:
+    META = {}
+    y, GREF, ITGT = heavy()
+    if CACHE:
+        os.makedirs(CACHE, exist_ok=True)
+        np.save(_c("y_pre.npy"), y)
+        if GREF is not None:
+            with open(_c("gref.pkl"), "wb") as f:
+                pickle.dump(GREF, f)
+        shutil.copy2(oI, _c("INSTRUMENTAL.wav")); shutil.copy2(oA, _c("ACAPELLA.wav"))
+
+# 1) MASTER: the tone settings this attempt tries
 y = bq_shelf(y, 75.0, SHELF_DB, False)      # low-shelf 60-90 Hz (default +1.5, override por argv[4])
 if AIR_DB != 0.0: y = bq_shelf(y, 9000.0, AIR_DB, True)   # high-shelf de aire (override por argv[5])
 if PRES_DB != 0.0: y = bq_peak(y, 3500.0, PRES_DB, 0.7)   # peak de presencia 2-6 kHz (override por argv[7])
@@ -201,38 +294,12 @@ if WIDEN > 1.0 and y.ndim == 2 and y.shape[1] == 2:       # ensancha via M/S (ov
     _mid = (y[:, 0] + y[:, 1]) * 0.5; _side = (y[:, 0] - y[:, 1]) * 0.5 * WIDEN
     y = np.stack([_mid + _side, _mid - _side], 1)
     _pk = np.max(np.abs(y)); y = y * (0.995 / _pk) if _pk > 0.995 else y
-if ST.guard_enabled():
-    # reference mode: the references set the tone, so the guard only limits band PEAKS here.
-    # (holding the tone to the original song undid the matching: a -8 dB air cut came back +3 dB)
-    y = ST.guard(y, ST._fit(RAW, len(y)) + ST._fit(load(IC), len(y)), tone_tol_db=99.0, log=L)
+if GREF is not None:
+    y = ST.guard(y, GREF, tone_tol_db=99.0, log=L)
 pk = np.max(np.abs(y)); y = y*(0.995/pk) if pk > 0.995 else y
-# loudness follows the references: at least as loud as the quietest one (the verdict's
-# "loudness >= ref min"), never quieter than -9.3, never past -7.0 (no crushed master)
-_ri = [i for i in (ebur(p)[0] for p in REFS.values()) if i is not None]
-ITGT = float(np.clip(min(_ri) - 0.2, -9.3, -7.0)) if _ri else -9.3
-if ITGT > -9.3: L(f"loudness target {ITGT:.1f} LUFS (quietest reference {min(_ri):.1f})")
 loud_to(w(os.path.join(WORK, "tv_m3.wav"), y), oM, Itgt=ITGT, tp_lin=0.871, drive=0.87)
 Im, Lm, Tm = ebur(oM); L(f"[1] MASTER       I={Im:6.1f} LRA={Lm:4.1f} TP={Tm:5.1f} corr{corr_of(oM):+.2f}")
-
-# 2) INSTRUMENTAL
-oI = os.path.join(OUT, PFX + "INSTRUMENTAL.wav")
-inst = glue(ST.instrumental(TAG, lambda x: transient_shape(x, boost_db=2.5), log=L))   # menos boost -> menos crest
-pk = np.max(np.abs(inst)); inst = inst*(0.99/pk) if pk > 0.99 else inst
-pB = libmaster(w(os.path.join(WORK, "tv_i0.wav"), inst), os.path.join(WORK, "tv_i1.wav"))
-y = mono_narrow(polish(load(pB)), 0.82)                 # estrecha ANTES de limitar -> mas headroom
-y = bq_shelf(y, 75.0, SHELF_DB, False)                  # mismo shelf de graves que el master
-if ST.guard_enabled():
-    y = ST.guard(y, ST._fit(load(IC), len(y)), tone_tol_db=99.0, log=L)   # peaks only (see MASTER)
-y = np.tanh(y*1.6)/np.tanh(1.6)                         # soft-clip suave: raspa picos, sube RMS alcanzable
-pk = np.max(np.abs(y)); y = y*(0.995/pk) if pk > 0.995 else y
-loud_to(w(os.path.join(WORK, "tv_i2.wav"), y), oI, Itgt=ITGT, tp_lin=0.871, drive=0.87)
 Ii, Li, Ti = ebur(oI); L(f"[2] INSTRUMENTAL I={Ii:6.1f} LRA={Li:4.1f} TP={Ti:5.1f} corr{corr_of(oI):+.2f}")
-
-# 3) ACAPELLA
-oA = os.path.join(OUT, PFX + "ACAPELLA.wav")
-va = plate(ST.gate(VOX, VACT)); rr = rms(va); va = va*(r0/rr) if rr > 0 else va
-pk = np.max(np.abs(va)); va = va*(0.98/pk) if pk > 0.98 else va
-loud_to(w(os.path.join(WORK, "tv_a0.wav"), va), oA, Itgt=-12.0, tp_lin=0.891, drive=0.89)
 Ia, La, Ta = ebur(oA); L(f"[3] ACAPELLA     I={Ia:6.1f} LRA={La:4.1f} TP={Ta:5.1f}")
 
 # 4) APPLE
@@ -245,21 +312,18 @@ loud_to(w(os.path.join(WORK, "tv_p1.wav"), arr), oP, Itgt=-12.0, tp_lin=0.891, d
 Ip, Lp, Tp = ebur(oP); L(f"[4] APPLE        I={Ip:6.1f} LRA={Lp:4.1f} TP={Tp:5.1f}")
 
 for f in os.listdir(WORK):
-    if f.startswith("tv_"):
+    if re.match(r"^tv_[a-z]\d\.wav$", f):          # only this script's temp files (a song may be named tv_...)
         try: os.remove(os.path.join(WORK, f))
         except Exception: pass
 
 # ================== COMPARISON vs REFS ==================
-def profile(p):
-    I, Lr, T = ebur(p); lo, pr, air, corr = bands_arr(load(p))
-    return dict(I=I, LRA=Lr, TP=T, low=lo, pres=pr, air=air, corr=corr)
-
 L("\n--- COMPARISON (band dB rel. 200-2k) ---")
 L(f"{'':24} {'I':>7} {'LRA':>6} {'TP':>6} {'low':>7} {'pres':>7} {'air':>7} {'corr':>6}")
-rows = [("MASTER V2", oM), ("APPLE V2", oP)] + [(f"REF {k}", v) for k, v in REFS.items()]
+RP = META.get("refprof") or {k: profile(v) for k, v in REFS.items()}   # the references never change mid-song
+rows = [("MASTER V2", oM), ("APPLE V2", oP)] + [(f"REF {k}", None) for k in REFS]
 P = {}
 for nm, pth in rows:
-    d = profile(pth); P[nm] = d
+    d = profile(pth) if pth else RP[nm[4:]]; P[nm] = d
     L(f"{nm:24} {d['I']:7.1f} {d['LRA']:6.1f} {d['TP']:6.1f} {d['low']:7.1f} {d['pres']:7.1f} {d['air']:7.1f} {d['corr']:6.2f}")
 rp = [P[f"REF {k}"] for k in REFS]
 mean = {k: float(np.mean([r[k] for r in rp])) for k in ("I", "LRA", "TP", "low", "pres", "air", "corr")}
@@ -279,6 +343,9 @@ ok = 0
 for nm, g in chk:
     ok += g; L(f"  [{'OK ' if g else 'XX '}] {nm}")
 L(f"\n{ok}/6 axes match or beat the {len(REFS)} refs.")
+if CACHE and not HIT:                           # written last: a cache without it is never used
+    with open(_c("meta.json"), "w", encoding="utf-8") as f:
+        json.dump({"ITGT": ITGT, "refprof": RP}, f)
 L("DONE track_v2")
 for f in sorted(os.listdir(OUT)):
     L(f"  {f}  ({os.path.getsize(os.path.join(OUT, f))//1024} KB)")

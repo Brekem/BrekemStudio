@@ -26,6 +26,7 @@ SP = os.environ.get("BREKEM_HOME") or os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SP)
 import stems as ST
 import tune as TU
+import exciter as EX
 from acap_pro import (SR, load, rms, deepfilter, debreath_at, deplosive_gated, dereverb, eq_sub,
                       vbus, glue, polish, bq_shelf, bq_peak, plate, loud_to, ebur, bands_arr,
                       run, WORK, STEMS)
@@ -205,20 +206,38 @@ def get_layer(name):
             layers[name] = shimmer(rest, vact)
     return layers[name]
 
-rows = []
 GREF = ST.guard_ref(raw + nov) if ST.guard_enabled() else None   # the original song's band ranges
 kick = ST.kick_env(drums) if np.any(drums) else None
 bass_base = ST.dry_bass(bass, kick) if ST.dry_enabled() else ST.mono_low(bass)
-for name, over in STYLES:
+for _nm, _ov in STYLES:                         # the shared layers, made once before the styles split up
+    for _k in ("fill", "shim"):
+        if dict(BASE, **_ov)[_k] is not None:
+            get_layer(_k)
+
+
+def plate_own(x):
+    """acap_pro.plate with a reverb of its own: styles run in parallel threads and one
+    reverb object must not process two songs at once."""
+    from pedalboard import Gain
+    pb = Pedalboard([Reverb(room_size=0.32, damping=0.62, wet_level=0.09, dry_level=0.93, width=0.9),
+                     Gain(gain_db=0.0)])
+    return pb(x.astype(np.float32), SR).astype(np.float64)
+
+
+def make_style(k, name, over):
+    """one style -> its WAV + MP3; returns (row, log lines). Runs in a worker thread: the heavy
+    parts (numpy/scipy filters, pedalboard, ffmpeg) release the GIL, so styles use every core."""
+    out = []
+    lg = lambda m: out.append(m)
     p = dict(BASE, **over)
-    L(f"=== {name}")
+    lg(f"=== {name}")
     dr = transient(drums, p["punch"]) * D(p["drums"])
     bs = bass_base * D(p["bass"])
     if p["kick_duck"] and kick is not None:
         bs = duck(bs, kick, p["kick_duck"])                      # bass steps aside for the kick
     rs = widen(ST.carve(rest, vact, depth_db=p["carve"]), p["width"]) * D(p["rest"])
     vx = vox * D(p["vox"])
-    vx = p["verb"] * plate(vx) + (1 - p["verb"]) * vx
+    vx = p["verb"] * plate_own(vx) + (1 - p["verb"]) * vx
     mix = vx + bleed + dr + bs + rs
     if p["fill"] is not None:
         mix = mix + set_rel(get_layer("fill"), mix, p["fill"]) * music_env(rest + bass)[:, None]
@@ -231,19 +250,35 @@ for name, over in STYLES:
     if p["pres"]: mix = bq_peak(mix, 3500.0, p["pres"], 0.7)
     if p["air"]: mix = bq_shelf(mix, 11000.0, p["air"], True)
     mix = tape(mix, p["tape"])
+    if EX.enabled():
+        mix = EX.excite(mix, log=lambda m: lg("  " + m))
     if GREF is not None:                    # style keeps its colour (+-4 dB per band), never leaves the song's range
-        mix = ST.guard(mix, GREF, tone_tol_db=4.0, log=lambda m: L("  " + m))
+        mix = ST.guard(mix, GREF, tone_tol_db=4.0, log=lambda m: lg("  " + m))
     pk = np.max(np.abs(mix)); mix = mix * (0.995 / pk) if pk > 0.995 else mix
     wav = os.path.join(OUT, name + ".wav")
-    tmp = w(os.path.join(WORK, "vr_in.wav"), mix)
+    tmp = w(os.path.join(WORK, f"vr_in_{os.getpid()}_{k}.wav"), mix)
     loud_to(tmp, wav, Itgt=p["lufs"], tp_lin=0.871, drive=p["drive"])
+    try: os.remove(tmp)
+    except Exception: pass
     run(["ffmpeg", "-v", "error", "-y", "-i", wav, "-c:a", "libmp3lame", "-b:a", "320k",
          "-id3v2_version", "3", os.path.join(OUT, name + ".mp3")])
     I, Lr, T = ebur(wav); lo, pr, air, corr = bands_arr(load(wav))
-    rows.append((name, I, Lr, T, lo, pr, air, corr))
-    L(f"  I={I:6.1f} LUFS  LRA={Lr:4.1f}  TP={T:5.1f}  low{lo:+.1f} pres{pr:+.1f} air{air:+.1f} corr{corr:+.2f}")
-try: os.remove(os.path.join(WORK, "vr_in.wav"))
-except Exception: pass
+    lg(f"  I={I:6.1f} LUFS  LRA={Lr:4.1f}  TP={T:5.1f}  low{lo:+.1f} pres{pr:+.1f} air{air:+.1f} corr{corr:+.2f}")
+    return (name, I, Lr, T, lo, pr, air, corr), out
+
+
+# as many styles at once as there are CPU cores (each holds a few copies of the song in RAM)
+from concurrent.futures import ThreadPoolExecutor
+NW = max(1, min(len(STYLES), (os.cpu_count() or 2) // 2))
+L(f"making {len(STYLES)} style(s), {NW} at a time")
+with ThreadPoolExecutor(NW) as ex:
+    futs = [ex.submit(make_style, k, name, over) for k, (name, over) in enumerate(STYLES)]
+    rows = []
+    for fu in futs:                             # in style order; each style's log in one block
+        row, lines = fu.result()
+        for m in lines:
+            L(m)
+        rows.append(row)
 
 with open(os.path.join(OUT, "_VARIANTS.txt"), "w", encoding="utf-8") as f:
     f.write(f"{TAG}\n\n{'style':22} {'LUFS':>6} {'LRA':>5} {'TP':>6} {'low':>6} {'pres':>6} {'air':>6} {'corr':>5}\n")

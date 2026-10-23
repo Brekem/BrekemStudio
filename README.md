@@ -131,6 +131,53 @@ out: the master styles you tick and/or, with pitch correction ticked,
 `TUNED MIX.wav` (the song with the vocal in tune, nothing else changed) and
 `ACAPELLA TUNED.wav`. CLI: `brekem_cli.py styles "<audio|folder>" "<out>" --styles clarity,punch --tune`.
 
+## Exciter (3.2)
+
+Tick **[X] Exciter** (Extras, every tab, off by default). An EQ can only turn up
+what is already there (hiss included); the exciter *creates* new overtones from the
+music itself, like an Aphex Aural Exciter on the top and Waves MaxxBass on the bottom:
+
+- **highs**: the band above 3 kHz goes through a soft saturator. Only the *new*
+  harmonics above 5 kHz are kept and mixed back low: sparkle and air (about +1.3 dB
+  above 5 kHz). Where an "S" spikes the exciter backs off, so it never adds harshness.
+- **bass**: the sub (30-110 Hz, centre only) gives its 2nd / 3rd harmonics (70-200 Hz,
+  kept under the mud zone), so the bass is heard on phones, laptops and earbuds that
+  can't play the sub. A clean 808 with no overtones gets them too. The layer always
+  adds in phase with the bass's own overtones, never cancels them.
+- both layers only play where the song plays (50+ dB under the loud parts = off), so
+  hiss in gaps and in the tail is never brought up.
+
+It runs on MASTER, INSTRUMENTAL and every master style, before the band guard and the
+limiter: the loudness target doesn't change, the guard still holds every band inside
+the song's range, and with references the verdict loop still matches their tone.
+ACAPELLA is never excited. CLI: `--exciter`.
+
+## NVIDIA GPU (3.3)
+
+Two installers per release:
+
+- **BREKEM STUDIO x.y.z Setup.exe**: CPU edition, runs on any PC.
+- **BREKEM.STUDIO.x.y.z.GPU.Setup.exe + its `.bin` parts**: GPU edition, built with
+  CUDA 12.8 PyTorch. Download the `.exe` and **every** `.bin` into the same empty folder
+  and run the `.exe`.
+
+With an NVIDIA card (GTX 16, RTX 20 / 30 / 40 / 50) and a recent driver, the GPU edition
+runs the AI parts on the card: the **Demucs separation** (the slow step: minutes on a
+CPU) and the **DeepFilterNet** vocal cleaning. On RTX 30 / 40 / 50 the matrix math uses
+the **tensor cores** (TF32; convolutions already do through cuDNN). No fp16, so the
+stems are the same quality as on the CPU. Everything else (EQ, matching, tuning,
+exciter, limiter) is CPU DSP and is unchanged.
+
+The app probes the card at startup with a real GPU computation and says in the log what
+runs where, e.g. `GPU: NVIDIA GeForce RTX 4070 (12 GB, CUDA 12.8) - AI separation +
+vocal cleaning run on it, tensor cores (TF32)`. No usable card (old driver, older
+GPU), or the CPU edition: everything runs on the CPU, as before. If the GPU separation
+fails (e.g. out of video memory) that song is separated again on the CPU. CLI: `--cpu`
+turns the GPU off.
+
+From source: after `pip install -r requirements.txt`, swap in the CUDA build with
+`pip install --force-reinstall --no-deps torch==2.8.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu128`.
+
 ## Loudness
 
 All loudness targets are reached with one static gain + a 4x-oversampled
@@ -164,7 +211,8 @@ CLI: `python brekem_cli.py master "<song>" "<out>" --sep htdemucs_6s --shifts 2`
 ## Build the installer
 
 See `build/BUILD.md`. Short version: `build\build.bat` runs PyInstaller and (if
-Inno Setup is installed) produces `BREKEM STUDIO Setup.exe`.
+Inno Setup is installed) produces `BREKEM STUDIO Setup.exe`; `build\build.bat gpu`
+builds the GPU edition (CUDA PyTorch).
 
 ## License
 

@@ -8,6 +8,7 @@ warnings.filterwarnings("ignore")
 
 SP = os.environ.get("BREKEM_HOME") or os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SP)
+import exciter as EX
 from acap_pro import (SR, load, rms, ebur, bands_arr, glue, polish, plate,
                       loud_to, bq_shelf, bq_peak, macro_expand, WORK)
 
@@ -66,6 +67,7 @@ y = bq_shelf(y, 12000.0, 1.0, True)
 _, lra0, _ = ebur(w(os.path.join(WORK, "nd_m0.wav"), y)); lra0 = lra0 or 6.0
 if lra0 < 6.0:
     y = macro_expand(y, ratio=1.25 + (6.0 - lra0) * 0.22)
+if EX.enabled(): y = EX.excite(y, log=L)
 pk = np.max(np.abs(y)); y = y * (0.995 / pk) if pk > 0.995 else y
 loud_to(w(os.path.join(WORK, "nd_m1.wav"), y), oM, Itgt=-9.5, tp_lin=0.891, drive=0.88)
 Im, Lm, Tm = ebur(oM); L(f"[1] MASTER       I={Im:6.1f} LRA={Lm:4.1f} TP={Tm:5.1f}")
@@ -74,6 +76,7 @@ Im, Lm, Tm = ebur(oM); L(f"[1] MASTER       I={Im:6.1f} LRA={Lm:4.1f} TP={Tm:5.1
 oI = os.path.join(OUT, "INSTRUMENTAL.wav")
 yi = mono_narrow(polish(inst), 0.82)
 yi = bq_shelf(yi, 80.0, 1.0, False)
+if EX.enabled(): yi = EX.excite(yi, log=L)
 yi = np.tanh(yi * 1.5) / np.tanh(1.5)
 pk = np.max(np.abs(yi)); yi = yi * (0.995 / pk) if pk > 0.995 else yi
 loud_to(w(os.path.join(WORK, "nd_i1.wav"), yi), oI, Itgt=-9.5, tp_lin=0.891, drive=0.88)
