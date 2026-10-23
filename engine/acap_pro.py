@@ -50,7 +50,9 @@ def debreath_at(voc, n, at_db=-9.0):
     env=sig.medfilt(env,2*max(1,int(0.025*SR/hop))+1)
     cent=librosa.feature.spectral_centroid(y=vm,sr=SR,n_fft=win,hop_length=hop)[0][:len(env)]
     Ln=len(env); fps=SR/hop
-    nf=np.percentile(env,10); P=np.percentile(env[env>nf+8],60); gap_thr,sing_thr=P-12,P-9
+    nf=np.percentile(env,10); loud=env[env>nf+8]
+    if loud.size==0: return voc, 0          # (almost) no voice in the stem (an instrumental): no breaths to find
+    P=np.percentile(loud,60); gap_thr,sing_thr=P-12,P-9
     lowm=env<gap_thr; gaps=[]; i=0
     while i<Ln:
         if lowm[i]:
