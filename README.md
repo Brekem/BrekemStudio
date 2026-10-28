@@ -14,6 +14,7 @@ Outputs per song:
 
 | Tab | Use |
 |-----|-----|
+| **Grabar (Record)** | Sing over a beat on your headset. Takes come out lined up with the beat (round trip calibrated once per headset), then one button sends the take + the beat (split into stems) to *Mix from stems*. |
 | **Máster** | One finished mix in → 4 deliverables out. Separates every stem (Demucs) + cleans the vocal (DeepFilterNet) automatically. |
 | **Lote** | A whole folder of songs, one after another. |
 | **Mezcla desde stems** | Your recorded vocal + a beat delivered as stems → auto mix + master. |
