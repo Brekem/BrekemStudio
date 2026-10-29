@@ -62,6 +62,20 @@ def matching_output(in_dev):
     return next((i for i, _ in devices("output") if m.group(1) in sd.query_devices(i)["name"]), None)
 
 
+def rescan():
+    """PortAudio lists the devices once, when it starts. A USB headset that Windows (or the
+    headset's own software) re-plugs since then leaves that list stale and opening it fails -
+    restart PortAudio so the list is read again."""
+    sd = _sd()
+    sd._terminate()
+    sd._initialize()
+
+
+def find(kind, name):
+    """the index of the device with this name now (indices move after a rescan), or None."""
+    return next((i for i, n in devices(kind) if n == name), None)
+
+
 def device_rate(in_dev, out_dev):
     """the rate both devices run at in shared mode (the output's mixer rate)."""
     sd = _sd()
@@ -215,12 +229,27 @@ class Session:
         if self.on_end:
             self.on_end()
 
-    def start(self):
+    def _open(self):
         sd = _sd()
         self.stream = sd.Stream(device=(self.in_dev, self.out_dev), samplerate=self.sr,
                                 channels=(_in_channels(self.in_dev), 2), dtype="float32",
                                 latency="low", callback=self._cb, finished_callback=self._finished)
         self.stream.start()
+
+    def start(self):
+        sd = _sd()
+        names = sd.query_devices(self.in_dev)["name"], sd.query_devices(self.out_dev)["name"]
+        try:
+            self._open()
+        except sd.PortAudioError:
+            # stale device list (headset re-plugged since PortAudio started): read it again
+            self.stream = None
+            rescan()
+            i, o = find("input", names[0]), find("output", names[1])
+            if i is None or o is None:
+                raise RuntimeError(f"{names[0] if i is None else names[1]} is not connected")
+            self.in_dev, self.out_dev = i, o
+            self._open()
 
     def stop(self):
         st, self.stream = self.stream, None
@@ -240,7 +269,8 @@ class Session:
 
 
 def calibrate(in_dev, out_dev, log=print):
-    """play clicks with the earcup held against the mic; returns the measured round trip in ms."""
+    """play clicks with the earcup held against the mic. Returns (round trip ms, mic, headphones):
+    the device indices it really used (they move if the devices had to be rescanned)."""
     sr = device_rate(in_dev, out_dev)
     x, pos = click_train(sr)
     s = Session(np.repeat(x[:, None], 2, 1), sr, in_dev, out_dev)
@@ -258,7 +288,7 @@ def calibrate(in_dev, out_dev, log=print):
         raise RuntimeError("the clicks did not line up (noise in the room?) - try again")
     ms = float(np.median(d)) / sr * 1000.0
     log(f"round trip measured: {ms:.1f} ms  (driver says {s.reported_latency_s() * 1000:.1f} ms)")
-    return ms
+    return ms, s.in_dev, s.out_dev
 
 
 def beat_stems(beat, split, sep, log):

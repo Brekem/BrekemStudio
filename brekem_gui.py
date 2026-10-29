@@ -220,7 +220,8 @@ class App(ttk.Frame):
         ttk.Label(f, text="Mic:").grid(row=1, column=0, sticky="w", pady=(6, 0))
         self.r_in_cb = ttk.Combobox(f, textvariable=self.r_in, state="readonly")
         self.r_in_cb.grid(row=1, column=1, sticky="ew", padx=6, pady=(6, 0))
-        ttk.Button(f, text="Refresh", command=self._rec_devices).grid(row=1, column=2, pady=(6, 0))
+        ttk.Button(f, text="Refresh", command=lambda: self._rec_devices(rescan=True)).grid(
+            row=1, column=2, pady=(6, 0))
         ttk.Label(f, text="Headphones:").grid(row=2, column=0, sticky="w", pady=(6, 0))
         self.r_out_cb = ttk.Combobox(f, textvariable=self.r_out, state="readonly")
         self.r_out_cb.grid(row=2, column=1, sticky="ew", padx=6, pady=(6, 0))
@@ -299,8 +300,15 @@ class App(ttk.Frame):
         self.r_opts = self._opts_panel(f, 12)
         self._rec_devices()
 
-    def _rec_devices(self):
+    def _rec_devices(self, rescan=False):
         try:
+            if rescan:
+                if self.r_sess is not None:
+                    return
+                R.rescan()
+                # the indices may have moved: pick the headset again
+                for var in (self.r_in, self.r_out):
+                    var.set("")
             ins, outs = R.devices("input"), R.devices("output")
             di = R.default_device("input")
             do = (R.matching_output(di) if di is not None else None) or R.default_device("output")
@@ -315,6 +323,16 @@ class App(ttk.Frame):
         if not self.r_out.get() and outs:
             self.r_out.set(next((lab(i, n) for i, n in outs if i == do), lab(*outs[0])))
         self._rec_lat_label()
+
+    def _rec_follow(self, i, o):
+        """a session that had to rescan opened the devices under new indices: show those."""
+        try:
+            self._rec_devices()
+            self.r_in.set(next(v for v in self.r_in_cb.cget("values") if v.startswith(f"{i}:")))
+            self.r_out.set(next(v for v in self.r_out_cb.cget("values") if v.startswith(f"{o}:")))
+            self._rec_lat_label()
+        except StopIteration:
+            pass
 
     def _rec_devs(self):
         try:
@@ -418,6 +436,8 @@ class App(ttk.Frame):
             if s.done.is_set():
                 s.stop()
                 self.r_sess = None
+                if (s.in_dev, s.out_dev) != devs:
+                    self._rec_follow(s.in_dev, s.out_dev)
                 self.r_meter.configure(value=0)
                 self.status.configure(text="Ready")
                 on_done(s)
@@ -442,7 +462,7 @@ class App(ttk.Frame):
             self.r_t0 = st
             self.status.configure(text="Recording...  (Stop when done)")
             self._rec_run(x[s0:] * float(self.r_beatvol.get()), sr, devs, float(self.r_mon.get()),
-                          lambda s: self._rec_save(s, devs, sr, s0, len(x)))
+                          lambda s: self._rec_save(s, (s.in_dev, s.out_dev), sr, s0, len(x)))
         self._rec_beat(sr, go)
 
     def _rec_save(self, s, devs, sr, s0, total):
@@ -513,12 +533,15 @@ class App(ttk.Frame):
             return
         self.status.configure(text="Calibrating...")
 
-        def done(ms, err):
+        def done(res, err):
             self.status.configure(text="Ready")
             if err:
                 messagebox.showwarning(APP, f"Calibration failed: {err}")
                 return
-            R.save_latency_ms(*devs, ms)
+            ms, i, o = res
+            R.save_latency_ms(i, o, ms)
+            if (i, o) != devs:
+                self._rec_follow(i, o)
             self._rec_lat_label()
         self._bg_then(lambda: R.calibrate(*devs, log=self.log), done)
 
