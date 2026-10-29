@@ -1,11 +1,25 @@
-## BREKEM STUDIO 3.4.0
+## BREKEM STUDIO 3.5.0
 
 **Dos instaladores. Escoge uno:**
 
 - **Tienes tarjeta NVIDIA (GTX 16, RTX 20 / 30 / 40 / 50): edición GPU.** Descarga
-  `BREKEM.STUDIO.3.4.0.GPU.Setup.exe` **y todos los archivos `.bin`** que tienen el mismo
+  `BREKEM.STUDIO.3.5.0.GPU.Setup.exe` **y todos los archivos `.bin`** que tienen el mismo
   nombre, en una carpeta vacía. Abre el `.exe`: él solo usa los `.bin`.
-- **No tienes NVIDIA: edición normal.** Descarga `BREKEM.STUDIO.3.4.0.Setup.exe`.
+- **No tienes NVIDIA: edición normal.** Descarga `BREKEM.STUDIO.3.5.0.Setup.exe`.
+
+### Nuevo en 3.5: graba tu voz sobre el beat (pestaña Record)
+- **Pestaña Record (la primera)**: escoges el beat, te pones los audífonos y le das a
+  **● REC**. Cada toma se guarda (`take_01`, `take_02`...) y la puedes oír con el beat.
+- **Voz a tiempo con el beat**: **Calibrate** mide una vez el retraso de tu audífono
+  (pegas una copa al micrófono y suenan 6 clics) y cada toma se corre esos milisegundos.
+  Hay un ajuste fino de ±60 ms.
+- **Start at (m:ss)**: graba solo una parte; la toma queda en su lugar de la canción.
+- Medidor de nivel con aviso **CLIP**, volumen del beat y **Hear myself** para oírte.
+- Escoge sola los audífonos que van con tu micrófono (por ejemplo los dos del mismo headset).
+- **Mix and master the selected take**: separa el beat en stems (Demucs) y lo manda con tu
+  toma a *Mix from stems*. Salen MASTER / INSTRUMENTAL / ACAPELLA / APPLE DIGITAL MASTER.
+- Si Windows o el programa del headset lo reconecta con la app abierta, lo vuelve a
+  encontrar solo (o con **Refresh**).
 
 ### Nuevo en 3.4: mucho más rápido, mismo sonido
 - **Máster con referencias**: los intentos y la búsqueda del 6/6 son los mismos. Lo que sale

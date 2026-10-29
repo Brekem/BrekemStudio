@@ -10,7 +10,7 @@ import glob
 import subprocess
 import threading
 
-VERSION = "3.4.0"
+VERSION = "3.5.0"
 FROZEN = getattr(sys, "frozen", False)
 
 def _res_root():
