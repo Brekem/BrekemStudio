@@ -13,3 +13,4 @@ refs/
 *.zip
 build/*.log
 *.log
+.venv*/

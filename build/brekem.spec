@@ -31,6 +31,19 @@ try:
 except Exception as e:
     print("soundfile data NOT bundled:", e)
 
+# sounddevice (Record tab) loads PortAudio from _sounddevice_data/ - ship it the same way.
+try:
+    import _sounddevice_data
+    _sdd = os.path.dirname(_sounddevice_data.__file__)
+    for dirpath, _, files in os.walk(_sdd):
+        for fn in files:
+            rel = os.path.join("_sounddevice_data", os.path.relpath(dirpath, _sdd))
+            datas.append((os.path.join(dirpath, fn), os.path.normpath(rel)))
+    hiddenimports += ["sounddevice", "_sounddevice_data"]
+    print("bundled _sounddevice_data from", _sdd)
+except Exception as e:
+    print("sounddevice data NOT bundled:", e)
+
 # our own resources (kept as a folder tree next to the exe internals)
 for sub in ("engine", "vendor", "refs", "models"):
     p = os.path.join(ROOT, sub)
@@ -46,7 +59,7 @@ for fn in ("LICENSE", "NOTICE.md", "README.md"):
         datas.append((os.path.join(ROOT, fn), "."))
 
 hiddenimports += [
-    "brekem_env", "brekem_cli", "brekem_gui",
+    "brekem_env", "brekem_cli", "brekem_gui", "brekem_rec",
     "sklearn.utils._typedefs", "sklearn.neighbors._partition_nodes",
     "scipy._lib.array_api_compat.numpy.fft",
 ]
