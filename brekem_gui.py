@@ -31,7 +31,7 @@ AUDIO_FT = (("Audio", "*.wav *.flac *.mp3 *.m4a *.aac *.ogg *.opus *.aif *.aiff 
 
 class Console(tk.Text):
     def __init__(self, master):
-        super().__init__(master, height=18, wrap="word", bg="#0f1113", fg="#d7dde3",
+        super().__init__(master, height=8, wrap="word", bg="#0f1113", fg="#d7dde3",
                          insertbackground="#d7dde3", font=("Consolas", 9), relief="flat")
         self.configure(state="disabled")
         self.q = queue.Queue()
@@ -63,11 +63,15 @@ class App(ttk.Frame):
         root.columnconfigure(0, weight=1)
         root.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
-        self.rowconfigure(1, weight=1)
+        self.rowconfigure(0, weight=3)    # the tabs get most of the window...
+        self.rowconfigure(1, weight=1)    # ...the console the rest
         self.busy = False
 
         nb = ttk.Notebook(self)
         nb.grid(row=0, column=0, sticky="nsew")
+        self.nb = nb
+        self._canvases = []               # one scrolling canvas per tab, in tab order
+        root.bind_all("<MouseWheel>", self._wheel)
         self.tab_record(nb)
         self.tab_master(nb)
         self.tab_batch(nb)
@@ -89,6 +93,36 @@ class App(ttk.Frame):
         self._refresh_refs()
 
     # ---------- helpers ----------
+    def _tab(self, nb, text):
+        """a notebook page that scrolls (scrollbar or mouse wheel) when it is taller than the window."""
+        outer = ttk.Frame(nb)
+        nb.add(outer, text=text)
+        outer.rowconfigure(0, weight=1)
+        outer.columnconfigure(0, weight=1)
+        bg = ttk.Style().lookup("TFrame", "background") or None
+        cv = tk.Canvas(outer, highlightthickness=0, bd=0, background=bg)
+        sb = ttk.Scrollbar(outer, orient="vertical", command=cv.yview)
+        cv.configure(yscrollcommand=sb.set)
+        cv.grid(row=0, column=0, sticky="nsew")
+        sb.grid(row=0, column=1, sticky="ns")
+        f = ttk.Frame(cv, padding=PAD)
+        win = cv.create_window(0, 0, window=f, anchor="nw")
+        f.bind("<Configure>", lambda _e: cv.configure(scrollregion=cv.bbox("all")))
+        cv.bind("<Configure>", lambda e: cv.itemconfigure(win, width=e.width))
+        self._canvases.append(cv)
+        return f
+
+    def _wheel(self, e):
+        """mouse wheel over a tab scrolls that tab (lists, the console and dropdowns keep their own)."""
+        w = e.widget
+        if isinstance(w, str) or not str(w).startswith(str(self.nb)):
+            return
+        if w.winfo_class() in ("Text", "Listbox", "TCombobox", "Scale", "TScale"):
+            return
+        cv = self._canvases[self.nb.index("current")]
+        if cv.yview() != (0.0, 1.0):
+            cv.yview_scroll(int(-e.delta / 120) or (-1 if e.delta > 0 else 1), "units")
+
     def log(self, s):
         self.con.write(s)
 
@@ -212,8 +246,7 @@ class App(ttk.Frame):
 
     # ---------- tab: record ----------
     def tab_record(self, nb):
-        f = ttk.Frame(nb, padding=PAD)
-        nb.add(f, text="Record")
+        f = self._tab(nb, "Record")
         f.columnconfigure(1, weight=1)
         self.r_beat = tk.StringVar()
         self.r_in = tk.StringVar()
@@ -598,8 +631,7 @@ class App(ttk.Frame):
 
     # ---------- tab: master ----------
     def tab_master(self, nb):
-        f = ttk.Frame(nb, padding=PAD)
-        nb.add(f, text="Master")
+        f = self._tab(nb, "Master")
         f.columnconfigure(1, weight=1)
         self.m_in = tk.StringVar()
         self.m_out = tk.StringVar()
@@ -632,8 +664,7 @@ class App(ttk.Frame):
 
     # ---------- tab: batch ----------
     def tab_batch(self, nb):
-        f = ttk.Frame(nb, padding=PAD)
-        nb.add(f, text="Batch")
+        f = self._tab(nb, "Batch")
         f.columnconfigure(1, weight=1)
         self.b_in = tk.StringVar()
         self.b_out = tk.StringVar()
@@ -661,8 +692,7 @@ class App(ttk.Frame):
 
     # ---------- tab: mix from stems ----------
     def tab_stem(self, nb):
-        f = ttk.Frame(nb, padding=PAD)
-        nb.add(f, text="Mix from stems")
+        f = self._tab(nb, "Mix from stems")
         f.columnconfigure(1, weight=1)
         self.s_stems = tk.StringVar()
         self.s_vox = tk.StringVar()
@@ -699,8 +729,7 @@ class App(ttk.Frame):
 
     # ---------- shared distribute panel ----------
     def _distrib_panel(self, nb, tab_text, clean):
-        f = ttk.Frame(nb, padding=PAD)
-        nb.add(f, text=tab_text)
+        f = self._tab(nb, tab_text)
         f.columnconfigure(1, weight=1)
         d_in = tk.StringVar()
         d_out = tk.StringVar()
@@ -760,8 +789,7 @@ class App(ttk.Frame):
 
     # ---------- tab: styles & tune only ----------
     def tab_styles(self, nb):
-        f = ttk.Frame(nb, padding=PAD)
-        nb.add(f, text="Styles & Tune")
+        f = self._tab(nb, "Styles & Tune")
         f.columnconfigure(1, weight=1)
         self.y_in = tk.StringVar()
         self.y_out = tk.StringVar()
@@ -795,8 +823,7 @@ class App(ttk.Frame):
 
     # ---------- tab: references ----------
     def tab_refs(self, nb):
-        f = ttk.Frame(nb, padding=PAD)
-        nb.add(f, text="References")
+        f = self._tab(nb, "References")
         f.columnconfigure(0, weight=1)
         f.rowconfigure(1, weight=1)
         ttk.Label(f, text="Drop in 2-4 commercial songs whose sound you want to match.\n"
