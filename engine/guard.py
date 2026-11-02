@@ -1,5 +1,6 @@
 """Finishing pass for a finished file (Distribute tabs), before the final limiter.
 Usage:  guard.py "<in>" "<out.wav>" [MASTER|INSTRUMENTAL|ACAPELLA]
+  beauty  (BREKEM_BEAUTY=<0..1>, MASTER / INSTRUMENTAL only): tame harsh / lift masked tones, see beauty.py
   exciter (BREKEM_EXCITER=1, MASTER / INSTRUMENTAL only): new harmonics, see exciter.py
   guard   (BREKEM_GUARD=1): every band's 10 ms peaks stay inside the file's own range
           (see stems.guard), so a single band can't slam the final limiter. The tone is
@@ -9,11 +10,14 @@ import os, sys, numpy as np, soundfile as sf
 sys.path.insert(0, os.environ.get("BREKEM_HOME") or os.path.dirname(os.path.abspath(__file__)))
 import stems as ST
 import exciter as EX
+import beauty as BE
 
 say = lambda m: print(m, flush=True)
 kind = sys.argv[3] if len(sys.argv) > 3 else "MASTER"
 x = ST.load(sys.argv[1])
 y = x
+if BE.enabled() and kind != "ACAPELLA":
+    y = BE.beautify(y, log=say)
 if EX.enabled() and kind != "ACAPELLA":
     y = EX.excite(y, log=say)
 if ST.guard_enabled():

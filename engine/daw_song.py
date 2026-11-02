@@ -28,6 +28,7 @@ from acap_pro import (SR, load, rms, run, ebur, bands_arr, vbus, glue, polish,
                       bq_shelf, bq_peak)
 import matchering as mg
 import exciter as EX
+import beauty as BE
 try: mg.log(info_handler=lambda *a, **k: None, warning_handler=lambda *a, **k: None)
 except Exception: pass
 
@@ -218,6 +219,7 @@ pk = np.max(np.abs(mix)); mix = mix*(0.99/pk) if pk > 0.99 else mix
 pB = libmaster(w(os.path.join(WORK, "ds_m0.wav"), mix), os.path.join(WORK, "ds_m1.wav"))
 y = bbmatch(load(pB)); pk = np.max(np.abs(y)); y = y*(0.995/pk) if pk > 0.995 else y
 y = matchering_avg(w(os.path.join(WORK, "ds_m2.wav"), y), "ds")
+if BE.enabled(): y = BE.beautify(y, log=L)
 if EX.enabled(): y = EX.excite(y, log=L)
 y = bq_shelf(y, 75.0, SHELF_DB, False)
 if AIR_DB != 0.0:  y = bq_shelf(y, 9000.0, AIR_DB, True)
@@ -235,6 +237,7 @@ inst2 = glue(inst2)
 pk = np.max(np.abs(inst2)); inst2 = inst2*(0.99/pk) if pk > 0.99 else inst2
 pB = libmaster(w(os.path.join(WORK, "ds_i0.wav"), inst2), os.path.join(WORK, "ds_i1.wav"))
 y = polish(load(pB))
+if BE.enabled(): y = BE.beautify(y, log=L)
 if EX.enabled(): y = EX.excite(y, log=L)
 y = bq_shelf(y, 75.0, SHELF_DB, False)
 y = np.tanh(y*1.6)/np.tanh(1.6)

@@ -34,8 +34,9 @@ def enabled():
 
 
 def proc_cache():
-    """file name of the cached clean vocal chain (tuned and untuned are kept apart)."""
-    return "vocals_proc_tuned.wav" if enabled() else "vocals_proc.wav"
+    """file name of the cached clean vocal chain (tuned / untuned, clean voice on / off kept apart)."""
+    clean = "_cv" if os.environ.get("BREKEM_CLEANVOX", "0") == "1" else ""
+    return ("vocals_proc_tuned" if enabled() else "vocals_proc") + clean + ".wav"
 
 
 def detect_key(beat):

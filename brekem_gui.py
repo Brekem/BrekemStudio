@@ -119,7 +119,7 @@ class App(ttk.Frame):
             C._GPU_SAID.append(1); self.log(line)
 
     def _opts_panel(self, f, row, styles=()):
-        """styles (each its own [X]) + dry bass / band guard / tuning / exciter [X]; returns a getter."""
+        """styles (each its own [X]) + dry bass / band guard / tuning / exciter / beauty [X]; returns a getter."""
         box = ttk.LabelFrame(f, text="Master styles  (mark with X the ones you want, each comes out separately)",
                              padding=6)
         box.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(10, 0))
@@ -141,8 +141,22 @@ class App(ttk.Frame):
         b4, exc = self._xbox(ext, "Exciter - new harmonics: brighter, airier top + bass you hear on phones and "
                                   "earbuds (no hiss lifted)", False)
         b4.grid(row=3, column=0, sticky="w")
+        bt = ttk.Frame(ext)
+        bt.grid(row=4, column=0, sticky="ew")
+        b5, bea = self._xbox(bt, "Beauty maximizer - harsh rings pulled down, buried notes lifted, body between "
+                                 "hits raised. Amount:", False)
+        b5.pack(side="left")
+        amt = tk.DoubleVar(value=50.0)
+        amt_lbl = ttk.Label(bt, text="50%", width=5)
+        ttk.Scale(bt, from_=10.0, to=100.0, variable=amt, orient="horizontal", length=160,
+                  command=lambda v: amt_lbl.configure(text=f"{float(v):.0f}%")).pack(side="left", padx=(6, 4))
+        amt_lbl.pack(side="left")
+        b6, cln = self._xbox(ext, "Clean voice - only the voice: headphone leak, mains hum, mouth clicks and the "
+                                  "gaps between phrases removed", True)
+        b6.grid(row=5, column=0, sticky="w")
         return lambda: dict(variants=[sid for sid, v in picks if v.get()], dry=dry.get(), guard=grd.get(),
-                            tune=tun.get(), exciter=exc.get())
+                            tune=tun.get(), exciter=exc.get(),
+                            beauty=round(amt.get()) / 100.0 if bea.get() else 0.0, cleanvox=cln.get())
 
     def _sep_row(self, f, row):
         """'Separation' dropdown; returns a getter for the chosen Demucs model."""
@@ -281,6 +295,7 @@ class App(ttk.Frame):
         tb = ttk.Frame(tk_)
         tb.grid(row=1, column=0, sticky="w", pady=(6, 0))
         ttk.Button(tb, text="▶  Play with beat", command=self._rec_play).pack(side="left")
+        ttk.Button(tb, text="Clean take", command=self._rec_clean).pack(side="left", padx=(6, 0))
         ttk.Button(tb, text="Delete take", command=self._rec_del).pack(side="left", padx=6)
         ttk.Button(tb, text="Open folder", command=self._rec_open_dir).pack(side="left")
 
@@ -545,6 +560,26 @@ class App(ttk.Frame):
             self._rec_lat_label()
         self._bg_then(lambda: R.calibrate(*devs, log=self.log), done)
 
+    def _rec_clean(self):
+        """take_NN.wav -> take_NN_clean.wav (only the voice), listed next to it to compare."""
+        take = self._rec_take()
+        if not take:
+            return
+        if take.endswith("_clean.wav"):
+            messagebox.showinfo(APP, "This take is already cleaned.")
+            return
+        beat = self.r_beat.get().strip()
+        out = take[:-4] + "_clean.wav"
+        self.log(f"--- clean take: {os.path.basename(take)}")
+
+        def job():
+            rc = E.run_engine("cleantake.py", [take, out, beat], on_line=lambda s: self.log("  " + s))
+            if rc == 0 and os.path.exists(out):
+                self.root.after(0, lambda: self._rec_refresh_takes(select=os.path.basename(out)))
+            else:
+                self.log("!! clean take failed")
+        self._run_bg(job, needs_refs=False)
+
     def _go_rec_mix(self):
         take = self._rec_take()
         beat, o = self.r_beat.get().strip(), self.r_dir.get().strip()
@@ -553,6 +588,8 @@ class App(ttk.Frame):
         if not o:
             messagebox.showwarning(APP, "Pick an output folder."); return
         split, sep, vox, kw = self.r_split.get(), self.r_sep(), float(self.r_vox_off.get()), self.r_opts()
+        if take.endswith("_clean.wav"):
+            kw["cleanvox"] = False     # already cleaned (Clean take): don't do it twice
 
         def job():
             d = R.beat_stems(beat, split, sep, self.log)

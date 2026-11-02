@@ -31,6 +31,7 @@ sys.path.insert(0, SP)
 from acap_pro import deepfilter, deplosive_gated, dereverb   # limpieza de voz
 import stems as ST
 import tune as TU
+import cleantake as CT
 
 SR = 48000
 STEMDIR = sys.argv[1]
@@ -157,6 +158,11 @@ print(f"instrumental bus: {Li:.2f} LUFS  peak {20*np.log10(np.max(np.abs(inst)))
 
 # ---------------------------------------------------------------- voz limpia
 vraw = load(VOXFILE); nv = len(vraw)
+if CT.enabled():                                   # only the voice: headphone leak, hum, clicks, gaps
+    _beat = np.zeros(nv)                           # the raw beat (all stems), as it played in the headphones
+    for f in files:
+        _b = load(f).mean(1)[:nv]; _beat[:len(_b)] += _b
+    vraw = CT.clean_voice(vraw, SR, beat=_beat, full=True, log=lambda m: print(m, flush=True))
 if TU.enabled():                                   # afinacion natural en la tonalidad del beat
     _pcs, _lbl, _r = TU.detect_key(inst)
     print(f"tune: key {_lbl}", flush=True)
