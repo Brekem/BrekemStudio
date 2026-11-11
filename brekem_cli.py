@@ -221,8 +221,10 @@ def _master_noref(audio, outdir, log, sep=None, shifts=1, variants=None):
 
 
 def master_one(audio, outdir, care=True, log=print, sep=None, shifts=1, variants=None,
-               dry=True, guard=True, tune=False, exciter=False, beauty=0.0, cleanvox=True):
-    """variants: list of style ids (or True = all) -> <outdir>/VARIANTS."""
+               dry=True, guard=True, tune=False, exciter=False, beauty=0.0, cleanvox=True, on_crash=None):
+    """variants: list of style ids (or True = all) -> <outdir>/VARIANTS.
+    on_crash: called before the one retry when the engine crashes (batch: wait for the
+    next song's separation, so the retry has the memory to itself)."""
     E.apply_env()
     _gpu(log)
     _opts(dry, guard, tune, exciter, beauty, cleanvox)
@@ -243,16 +245,17 @@ def master_one(audio, outdir, care=True, log=print, sep=None, shifts=1, variants
     shutil.rmtree(cache, ignore_errors=True)
     os.environ["BREKEM_TV_CACHE"] = cache
     try:
-        return _master_attempts(audio, outdir, care, log, variants, tag, name, stage)
+        return _master_attempts(audio, outdir, care, log, variants, tag, name, stage, on_crash)
     finally:
         os.environ.pop("BREKEM_TV_CACHE", None)
         shutil.rmtree(cache, ignore_errors=True)
 
 
-def _master_attempts(audio, outdir, care, log, variants, tag, name, stage):
+def _master_attempts(audio, outdir, care, log, variants, tag, name, stage, on_crash=None):
     attempts = 6 if care else 3
     sh, air, nar, pr, wd = 1.5, 0.0, 0.0, 0.0, 0.0
     best = None
+    crashes = 0
     seen = set()
     lim, i = LIMITS_NORMAL, 0
 
@@ -265,11 +268,23 @@ def _master_attempts(audio, outdir, care, log, variants, tag, name, stage):
         i += 1
         shutil.rmtree(stage, ignore_errors=True); os.makedirs(stage, exist_ok=True)
         out = []
-        E.run_engine("track_v2.py",
-                     [name, stage, "", f"{sh:.2f}", f"{air:.2f}", f"{nar:.2f}", f"{pr:.2f}", f"{wd:.2f}"],
-                     on_line=lambda s: (out.append(s), log("  " + s)))
+        rc = E.run_engine("track_v2.py",
+                          [name, stage, "", f"{sh:.2f}", f"{air:.2f}", f"{nar:.2f}", f"{pr:.2f}", f"{wd:.2f}"],
+                          on_line=lambda s: (out.append(s), log("  " + s)))
         ok, d, verd = _parse("\n".join(out))
         have4 = all(os.path.exists(os.path.join(stage, k + ".wav")) for k in DELIV)
+        if rc != 0 and not have4:
+            # the engine crashed (out of memory, ...): that says nothing about the tone, so
+            # don't search tones - free what we can and run the same settings once more
+            crashes += 1
+            if crashes > 1:
+                log("  !! the engine failed twice on this song - stopping it here"); break
+            log("  !! the engine stopped with an error (see above) - retrying the same settings once"
+                + (" after the next song's separation finishes (frees memory)" if on_crash else ""))
+            if on_crash:
+                on_crash()
+            i -= 1
+            continue
         log(f"  attempt {i}: {ok}/6  tonal={_tonal(d):.1f}  params=({sh},{air},{nar},{pr},{wd})")
         if best is None or ok > best[0] or (ok == best[0] and _tonal(d) < _tonal(best[3])):
             best = (ok, (sh, air, nar, pr, wd), _snapshot(stage), d)
@@ -286,6 +301,11 @@ def _master_attempts(audio, outdir, care, log, variants, tag, name, stage):
         if i == attempts and lim is LIMITS_NORMAL:
             widen("not 6/6 after the usual attempts")
 
+    if best is None:                       # every run crashed: nothing to deliver for this song
+        shutil.rmtree(stage, ignore_errors=True)
+        log(f"=> FAILED {os.path.basename(audio)} - no master (see the error above); run it again "
+            f"later - finished songs are skipped")
+        return {"ok": -1, "reason": "engine-failed", "outdir": outdir}
     bok, bpar, bsnap, bd = best
     if care and bok >= 6 and _tonal(bd) >= 1.2:
         rp = _refine(bpar, bd, lim)
@@ -379,6 +399,11 @@ class _Prefetch:
         t.start()
         self.th[tag] = t
 
+    def settle(self):
+        """wait for any separation running now (it stays cached for when its song comes)."""
+        for t in list(self.th.values()):
+            t.join()
+
     def ready(self, audio):
         """wait until this song's stems are cached (its own separation then is a cache hit)."""
         t = self.th.pop(_safe_tag(audio), None)
@@ -405,11 +430,16 @@ def batch(folder, outroot, care=True, log=print, sep=None, shifts=1, variants=No
         if i < len(jobs):
             pf.start(jobs[i][0])
         r = master_one(f, od, care=care, log=log, sep=sep, shifts=shifts, variants=variants,
-                       dry=dry, guard=guard, tune=tune, exciter=exciter, beauty=beauty, cleanvox=cleanvox)
+                       dry=dry, guard=guard, tune=tune, exciter=exciter, beauty=beauty, cleanvox=cleanvox,
+                       on_crash=pf.settle)
         res.append((name, r.get("ok", -1)))
     log("\n=== BATCH SUMMARY ===")
     for name, k in res:
-        log(f"  {k}  {name}")
+        log(f"  {'FAILED' if k < 0 else f'{k}/6':6s}  {name}")
+    failed = [name for name, k in res if k < 0]
+    if failed:
+        log(f"  {len(failed)} song(s) without a master: run the batch again on the same folders - "
+            f"finished songs are skipped, only these are redone")
 
 
 def _stem_styles(pm, voxfile, outdir, styles, log):
