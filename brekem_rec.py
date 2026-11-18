@@ -187,6 +187,106 @@ def next_take_path(beat):
     return os.path.join(takes_dir(beat), f"take_{(max(nums) + 1) if nums else 1:02d}.wav")
 
 
+def rename_take(path, label):
+    """take_03.wav + "jaquemate" -> take_03_jaquemate.wav (the number stays, so it still sorts
+    and counts as a take). Returns the new path."""
+    m = re.match(r"(take_\d+)", os.path.basename(path))
+    tag = re.sub(r"[^A-Za-z0-9_\-]", "", label.strip().replace(" ", "_"))[:30]
+    if not m or not tag:
+        raise ValueError("use letters / numbers for the name")
+    new = os.path.join(os.path.dirname(path), f"{m.group(1)}_{tag}.wav")
+    if os.path.exists(new):
+        raise ValueError(f"{os.path.basename(new)} already exists")
+    os.rename(path, new)
+    return new
+
+
+# ---------------------------------------------------------------- comp / feat
+# Every take is full song length on the beat's timeline, so combining them is only picking
+# which take sounds where: verses from one, the chorus from another (a comp), or several at
+# once (a feat, a double, ad-libs). Rows that overlap play together.
+COMP_FADE_S = 0.020    # crossfade at each row's edges: no click where one take hands over
+
+
+def parse_time(s):
+    """'1:05' / '65' / '65.5' -> seconds; '' -> None (= to the end)."""
+    s = (s or "").strip()
+    if not s:
+        return None
+    m, _, sec = s.rpartition(":")
+    t = int(m or 0) * 60 + float(sec)
+    if t < 0:
+        raise ValueError(s)
+    return t
+
+
+def fmt_time(t):
+    return "end" if t is None else f"{int(t // 60)}:{t % 60:04.1f}".replace(".0", "")
+
+
+def _plan_path(beat):
+    return os.path.join(takes_dir(beat), "comp_plan.json")
+
+
+def load_plan(beat):
+    try:
+        with open(_plan_path(beat), encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def save_plan(beat, rows):
+    os.makedirs(takes_dir(beat), exist_ok=True)
+    with open(_plan_path(beat), "w", encoding="utf-8") as f:
+        json.dump(rows, f, indent=1)
+
+
+def build_comp(beat, rows, log=print):
+    """rows: [{take: file name, start: s, end: s | None, gain_db}] -> take_NN_comp.wav (+ its plan
+    as .json next to it). Returns the new path."""
+    if not rows:
+        raise ValueError("add at least one row")
+    d = takes_dir(beat)
+    srcs, sr = {}, None
+    for r in rows:
+        p = os.path.join(d, r["take"])
+        if r["take"] not in srcs:
+            if not os.path.exists(p):
+                raise ValueError(f"{r['take']} is not there any more")
+            x, s = sf.read(p, dtype="float64")
+            x = x.mean(1) if x.ndim > 1 else x
+            if sr is None:
+                sr = s
+            elif s != sr:                     # recorded on another device: bring it to the first rate
+                import scipy.signal as sig
+                g = np.gcd(int(s), int(sr))
+                x = sig.resample_poly(x, sr // g, s // g)
+            srcs[r["take"]] = x
+    n = max(len(x) for x in srcs.values())
+    out = np.zeros(n)
+    fade = max(1, int(COMP_FADE_S * sr))
+    for r in rows:
+        x = srcs[r["take"]]
+        a = min(n, int(round(r["start"] * sr)))
+        b = min(len(x), n if r.get("end") is None else int(round(r["end"] * sr)))
+        if b - a < 2 * fade:
+            continue
+        w = np.ones(b - a)
+        w[:fade] = np.linspace(0.0, 1.0, fade)
+        w[-fade:] = np.linspace(1.0, 0.0, fade)
+        out[a:b] += x[a:b] * w * 10 ** (r.get("gain_db", 0.0) / 20)
+    pk = float(np.max(np.abs(out))) if n else 0.0
+    if pk > 0.99:                             # voices stacked past full scale: bring it all down evenly
+        out *= 0.99 / pk
+        log(f"comp: stacked voices peaked at {20 * np.log10(pk):+.1f} dBFS - lowered as a whole")
+    path = next_take_path(beat)[:-4] + "_comp.wav"
+    write_take(path, out.astype(np.float32), sr)
+    with open(path[:-4] + ".json", "w", encoding="utf-8") as f:
+        json.dump(rows, f, indent=1)
+    return path
+
+
 # ---------------------------------------------------------------- duplex session
 class Session:
     """plays `play` (n, 2) on out_dev while recording in_dev, both in one stream.

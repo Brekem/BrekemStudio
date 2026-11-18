@@ -329,8 +329,41 @@ class App(ttk.Frame):
         tb.grid(row=1, column=0, sticky="w", pady=(6, 0))
         ttk.Button(tb, text="▶  Play with beat", command=self._rec_play).pack(side="left")
         ttk.Button(tb, text="Clean take", command=self._rec_clean).pack(side="left", padx=(6, 0))
+        ttk.Button(tb, text="Name take...", command=self._rec_rename).pack(side="left", padx=(6, 0))
         ttk.Button(tb, text="Delete take", command=self._rec_del).pack(side="left", padx=6)
         ttk.Button(tb, text="Open folder", command=self._rec_open_dir).pack(side="left")
+
+        # comp / feat: which take sounds where (rows that overlap play together)
+        cp = ttk.LabelFrame(tk_, text="Comp / Feat - combine takes: verses from one, chorus from another, "
+                                      "or several voices at once (a feat, a double)", padding=6)
+        cp.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        cp.columnconfigure(0, weight=1)
+        add = ttk.Frame(cp)
+        add.grid(row=0, column=0, sticky="w")
+        self.c_from, self.c_to = tk.StringVar(value="0:00"), tk.StringVar()
+        self.c_take, self.c_gain = tk.StringVar(), tk.DoubleVar(value=0.0)
+        ttk.Label(add, text="From").pack(side="left")
+        ttk.Entry(add, textvariable=self.c_from, width=7).pack(side="left", padx=(4, 8))
+        ttk.Label(add, text="To").pack(side="left")
+        ttk.Entry(add, textvariable=self.c_to, width=7).pack(side="left", padx=(4, 8))
+        ttk.Label(add, text="Take").pack(side="left")
+        self.c_take_cb = ttk.Combobox(add, textvariable=self.c_take, state="readonly", width=28)
+        self.c_take_cb.pack(side="left", padx=(4, 8))
+        ttk.Label(add, text="Level dB").pack(side="left")
+        ttk.Spinbox(add, from_=-12.0, to=6.0, increment=0.5, textvariable=self.c_gain, width=5).pack(
+            side="left", padx=(4, 8))
+        ttk.Button(add, text="Add", command=self._comp_add).pack(side="left")
+        self.c_rows = tk.Listbox(cp, height=5, exportselection=False, font=("Consolas", 9))
+        self.c_rows.grid(row=1, column=0, sticky="ew", pady=(6, 0))
+        cb = ttk.Frame(cp)
+        cb.grid(row=2, column=0, sticky="w", pady=(6, 0))
+        ttk.Button(cb, text="Remove row", command=self._comp_del).pack(side="left")
+        ttk.Button(cb, text="Clear", command=self._comp_clear).pack(side="left", padx=6)
+        ttk.Button(cb, text="Build comp take", command=self._comp_build).pack(side="left")
+        ttk.Label(cp, text="Times in m:ss (empty 'To' = to the end). The result is a new take "
+                           "(take_NN_comp.wav): play it, clean it or mix it like any other.",
+                  foreground="#7b8794").grid(row=3, column=0, sticky="w", pady=(4, 0))
+        self.c_plan = []
 
         ttk.Label(f, text="Output folder:").grid(row=7, column=0, sticky="w", pady=(10, 0))
         ttk.Entry(f, textvariable=self.r_dir).grid(row=7, column=1, sticky="ew", padx=6, pady=(10, 0))
@@ -404,6 +437,7 @@ class App(ttk.Frame):
         if p:
             self.r_beat.set(p)
             self.r_dir.set(os.path.join(R.takes_dir(p), "MIX"))
+            self.c_plan = []                  # this beat's own comp plan is loaded below
             self._rec_refresh_takes()
 
     def _rec_refresh_takes(self, select=None):
@@ -411,14 +445,98 @@ class App(ttk.Frame):
         beat = self.r_beat.get().strip()
         if not beat:
             return
-        for p in R.list_takes(beat):
-            self.r_takes.insert("end", os.path.basename(p))
+        names = [os.path.basename(p) for p in R.list_takes(beat)]
+        for n in names:
+            self.r_takes.insert("end", n)
+        self.c_take_cb.configure(values=names)
+        if self.c_take.get() not in names:
+            self.c_take.set(names[0] if names else "")
+        if not self.c_plan:
+            self.c_plan = sorted(R.load_plan(beat), key=lambda r: r["start"])
+            self._comp_show()
         if select:
             names = self.r_takes.get(0, "end")
             if select in names:
                 k = names.index(select)
                 self.r_takes.selection_set(k)
                 self.r_takes.see(k)
+
+    def _rec_rename(self):
+        take = self._rec_take()
+        if not take:
+            return
+        from tkinter import simpledialog
+        label = simpledialog.askstring(APP, "Name for this take (e.g. the feat artist, 'chorus', 'adlibs'):",
+                                       parent=self.root)
+        if not label:
+            return
+        try:
+            new = R.rename_take(take, label)
+        except (ValueError, OSError) as e:
+            messagebox.showwarning(APP, str(e))
+            return
+        old, nn = os.path.basename(take), os.path.basename(new)
+        for r in self.c_plan:                 # the comp rows follow the take's new name
+            if r["take"] == old:
+                r["take"] = nn
+        self._comp_save()
+        self._rec_refresh_takes(select=nn)
+
+    # ---------- comp / feat ----------
+    def _comp_show(self):
+        self.c_rows.delete(0, "end")
+        for r in self.c_plan:                 # kept sorted by start, so a row's index is its line
+            self.c_rows.insert("end", f"{R.fmt_time(r['start']):>7} - {R.fmt_time(r.get('end')):<7}  "
+                                      f"{r['take']:<32} {r.get('gain_db', 0.0):+.1f} dB")
+
+    def _comp_save(self):
+        beat = self.r_beat.get().strip()
+        if beat:
+            R.save_plan(beat, self.c_plan)
+
+    def _comp_add(self):
+        if not self.r_beat.get().strip():
+            messagebox.showwarning(APP, "Pick the beat."); return
+        if not self.c_take.get():
+            messagebox.showwarning(APP, "Record or pick a take first."); return
+        try:
+            a, b = R.parse_time(self.c_from.get()) or 0.0, R.parse_time(self.c_to.get())
+            g = float(self.c_gain.get())
+        except (ValueError, tk.TclError):
+            messagebox.showwarning(APP, "Write the times as m:ss (e.g. 1:05) and the level as a number."); return
+        if b is not None and b <= a:
+            messagebox.showwarning(APP, "'To' must be after 'From'."); return
+        self.c_plan.append(dict(take=self.c_take.get(), start=a, end=b, gain_db=g))
+        self.c_plan.sort(key=lambda r: r["start"])
+        self._comp_save()
+        self._comp_show()
+        self.c_from.set(R.fmt_time(b) if b is not None else self.c_from.get())   # next row starts here
+        self.c_to.set("")
+
+    def _comp_del(self):
+        sel = self.c_rows.curselection()
+        if sel:
+            del self.c_plan[sel[0]]
+            self._comp_save()
+            self._comp_show()
+
+    def _comp_clear(self):
+        if self.c_plan and messagebox.askyesno(APP, "Clear all the comp rows?"):
+            self.c_plan = []
+            self._comp_save()
+            self._comp_show()
+
+    def _comp_build(self):
+        beat = self.r_beat.get().strip()
+        if not (beat and self.c_plan):
+            messagebox.showinfo(APP, "Add the rows first: which take from when to when."); return
+        try:
+            path = R.build_comp(beat, self.c_plan, log=self.log)
+        except (ValueError, OSError, RuntimeError) as e:
+            messagebox.showwarning(APP, f"Could not build the comp: {e}"); return
+        self.log(f"comp -> {os.path.basename(path)}: " + "; ".join(
+            f"{r['take']} {R.fmt_time(r['start'])}-{R.fmt_time(r.get('end'))}" for r in self.c_plan))
+        self._rec_refresh_takes(select=os.path.basename(path))
 
     def _rec_take(self):
         sel = self.r_takes.curselection()
@@ -568,6 +686,8 @@ class App(ttk.Frame):
         take = self._rec_take()
         if take and messagebox.askyesno(APP, f"Delete {os.path.basename(take)}?"):
             os.remove(take)
+            if os.path.exists(take[:-4] + ".json"):   # a comp's own plan goes with it
+                os.remove(take[:-4] + ".json")
             self._rec_refresh_takes()
 
     def _rec_calibrate(self):
