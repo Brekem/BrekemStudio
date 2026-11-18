@@ -26,7 +26,9 @@ SP = os.environ.get("BREKEM_HOME") or os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SP)
 import stems as ST
 import tune as TU
+import cleantake as CT
 import exciter as EX
+import beauty as BE
 from acap_pro import (SR, load, rms, deepfilter, debreath_at, deplosive_gated, dereverb, eq_sub,
                       vbus, glue, polish, bq_shelf, bq_peak, plate, loud_to, ebur, bands_arr,
                       run, WORK, STEMS)
@@ -147,7 +149,9 @@ def set_rel(layer, ref, db):
 # ------------------------------------------------------------------ stems
 if not (os.path.exists(os.path.join(SD, "vocals.flac")) and os.path.exists(os.path.join(SD, "no_vocals.flac"))):
     L("NO STEMS -> abort"); sys.exit(1)
-raw = load(os.path.join(SD, "vocals.flac")); n = len(raw); r0 = rms(raw)
+raw = load(os.path.join(SD, "vocals.flac")); n = len(raw)
+raw = CT.clean_voice(raw, SR, full=False, log=L) if CT.enabled() else raw   # hum + mouth clicks
+r0 = rms(raw)
 nov = ST._fit(load(os.path.join(SD, "no_vocals.flac")), n)
 vact = ST.vocal_activity(raw, nov)
 if TU.enabled():                                                 # natural pitch correction
@@ -250,6 +254,8 @@ def make_style(k, name, over):
     if p["pres"]: mix = bq_peak(mix, 3500.0, p["pres"], 0.7)
     if p["air"]: mix = bq_shelf(mix, 11000.0, p["air"], True)
     mix = tape(mix, p["tape"])
+    if BE.enabled():
+        mix = BE.beautify(mix, log=lambda m: lg("  " + m))
     if EX.enabled():
         mix = EX.excite(mix, log=lambda m: lg("  " + m))
     if GREF is not None:                    # style keeps its colour (+-4 dB per band), never leaves the song's range

@@ -104,6 +104,32 @@ and compared with the original song at the same loudness:
 In Distribute it only applies the peak part (the file is its own reference).
 CLI: `--no-guard` to turn it off.
 
+**Clean voice** (on by default) — only the voice stays in the vocal
+(`engine/cleantake.py`):
+- *headphone leak*: in a recorded vocal (Record, Mix from stems) the beat that leaks
+  from the headphones into the mic is learnt where nobody sings and subtracted
+  (only when it really lowers the gaps)
+- *mains hum*: 50 or 60 Hz and the harmonics actually found, notched out
+- *mouth clicks*: 0.5-3 ms spikes far over their surroundings pulled down in the
+  highs (consonants last longer and are left alone)
+- *gaps*: a gate silences where nobody sings; its threshold follows the take's own
+  noise floor, with a soft knee and a hold so soft words, word starts and ends survive.
+A vocal separated from a song (Master, Batch, Distribute, Styles) keeps its own
+bleed-aware gate; there clean voice only removes hum and clicks.
+On the Record tab, **Clean take** writes `take_NN_clean.wav` next to the take so you can
+hear it before mixing. CLI: `--no-clean-voice` to turn it off.
+
+**Beauty maximizer** (off by default, amount 10-100 %) — `engine/beauty.py`, before
+the exciter and the final limiter on MASTER / INSTRUMENTAL / styles:
+1. *tame*: harsh resonances (1.5-10 kHz) that are chronic in this song, and sibilant
+   bursts, are pulled down only while they ring (up to 6 dB)
+2. *recover*: notes and harmonics that hold for ~100 ms and only just clear what
+   surrounds them (the ones at risk of being masked) are lifted, up to 4 dB - as a
+   contrast: each octave keeps its energy, so the tone and the reference match hold
+3. *density*: the body between hits rises up to 2 dB (transients excluded), so the
+   limiter crushes the hits less at the same loudness.
+CLI: `--beauty 0.5`.
+
 ## Natural pitch correction (3.0)
 
 Tick **[X] Natural pitch correction** (Extras, every tab) and the vocal is tuned

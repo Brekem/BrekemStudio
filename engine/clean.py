@@ -10,6 +10,7 @@ sys.path.insert(0, SP)
 from acap_pro import (SR, load, rms, deepfilter, debreath_at, deplosive_gated,
                       dereverb, eq_sub, vbus, glue, STEMS)
 import stems as ST
+import cleantake as CT
 import tune as TU
 
 TAG = sys.argv[1]
@@ -19,7 +20,9 @@ ic = os.path.join(sd, "no_vocals.flac")
 if not (os.path.exists(vc) and os.path.exists(ic)):
     print("NO STEMS -> abort"); sys.exit(1)
 
-voc = load(vc); n = len(voc); r0 = rms(voc)
+voc = load(vc); n = len(voc)
+voc = CT.clean_voice(voc, SR, full=False, log=lambda m: print(m, flush=True)) if CT.enabled() else voc   # hum + mouth clicks
+r0 = rms(voc)
 raw = voc.copy()
 act = ST.vocal_activity(raw, load(ic))                # where the vocal stem really holds a vocal
 if TU.enabled():                                      # natural pitch correction

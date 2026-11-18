@@ -17,6 +17,10 @@ STYLE OPTS (every command): --styles cd,clarity,espacial,punch,warm,club,streami
                  vocal cleaning run on it when there is one)
   --exciter      harmonic exciter on the master: new overtones up top (air, sparkle) and
                  bass harmonics (the bass is heard on phones / earbuds)
+  --beauty 0.5   beauty maximizer (0..1): harsh resonances pulled down only while they ring,
+                 masked notes / harmonics lifted, the body between hits raised (see engine/beauty.py)
+  --no-clean-voice  keep the vocal as recorded (default: only the voice - headphone leak, mains hum,
+                 mouth clicks and the gaps between phrases removed, see engine/cleantake.py)
   brekem_cli.py stemmix  "<stemdir>" "<voxfile>" "<outdir>" [--vox -3.0]
   brekem_cli.py distribute "<audio|folder>" "<outdir>" [--lufs -9.5] [--no-split] [--clean] [--sep MODEL]
   brekem_cli.py styles "<audio|folder>" "<outdir>" --styles clarity,punch [--tune]   (only those, any audio)
@@ -36,12 +40,14 @@ SEP_DEFAULT = "htdemucs_ft"
 STYLE_IDS = ("cd", "clarity", "espacial", "punch", "warm", "club", "streaming", "signature")
 
 
-def _opts(dry, guard, tune=False, exciter=False):
-    """dry-bass / band-guard / natural-tuning / exciter switches, read by the engine scripts (env is inherited)."""
+def _opts(dry, guard, tune=False, exciter=False, beauty=0.0, cleanvox=True):
+    """dry-bass / band-guard / natural-tuning / exciter / beauty (amount 0..1, 0 = off) / clean-voice switches, read by the engine scripts (env is inherited)."""
     os.environ["BREKEM_DRY_BASS"] = "1" if dry else "0"
     os.environ["BREKEM_GUARD"] = "1" if guard else "0"
     os.environ["BREKEM_TUNE"] = "1" if tune else "0"
     os.environ["BREKEM_EXCITER"] = "1" if exciter else "0"
+    os.environ["BREKEM_CLEANVOX"] = "1" if cleanvox else "0"
+    os.environ["BREKEM_BEAUTY"] = f"{max(0.0, min(1.0, float(beauty or 0))):.2f}"
 
 
 _GPU_SAID = []
@@ -215,11 +221,13 @@ def _master_noref(audio, outdir, log, sep=None, shifts=1, variants=None):
 
 
 def master_one(audio, outdir, care=True, log=print, sep=None, shifts=1, variants=None,
-               dry=True, guard=True, tune=False, exciter=False):
-    """variants: list of style ids (or True = all) -> <outdir>/VARIANTS."""
+               dry=True, guard=True, tune=False, exciter=False, beauty=0.0, cleanvox=True, on_crash=None):
+    """variants: list of style ids (or True = all) -> <outdir>/VARIANTS.
+    on_crash: called before the one retry when the engine crashes (batch: wait for the
+    next song's separation, so the retry has the memory to itself)."""
     E.apply_env()
     _gpu(log)
-    _opts(dry, guard, tune, exciter)
+    _opts(dry, guard, tune, exciter, beauty, cleanvox)
     if not E.have_refs():
         return _master_noref(audio, outdir, log, sep, shifts, variants)
     tag = _safe_tag(audio)
@@ -237,16 +245,17 @@ def master_one(audio, outdir, care=True, log=print, sep=None, shifts=1, variants
     shutil.rmtree(cache, ignore_errors=True)
     os.environ["BREKEM_TV_CACHE"] = cache
     try:
-        return _master_attempts(audio, outdir, care, log, variants, tag, name, stage)
+        return _master_attempts(audio, outdir, care, log, variants, tag, name, stage, on_crash)
     finally:
         os.environ.pop("BREKEM_TV_CACHE", None)
         shutil.rmtree(cache, ignore_errors=True)
 
 
-def _master_attempts(audio, outdir, care, log, variants, tag, name, stage):
+def _master_attempts(audio, outdir, care, log, variants, tag, name, stage, on_crash=None):
     attempts = 6 if care else 3
     sh, air, nar, pr, wd = 1.5, 0.0, 0.0, 0.0, 0.0
     best = None
+    crashes = 0
     seen = set()
     lim, i = LIMITS_NORMAL, 0
 
@@ -259,11 +268,23 @@ def _master_attempts(audio, outdir, care, log, variants, tag, name, stage):
         i += 1
         shutil.rmtree(stage, ignore_errors=True); os.makedirs(stage, exist_ok=True)
         out = []
-        E.run_engine("track_v2.py",
-                     [name, stage, "", f"{sh:.2f}", f"{air:.2f}", f"{nar:.2f}", f"{pr:.2f}", f"{wd:.2f}"],
-                     on_line=lambda s: (out.append(s), log("  " + s)))
+        rc = E.run_engine("track_v2.py",
+                          [name, stage, "", f"{sh:.2f}", f"{air:.2f}", f"{nar:.2f}", f"{pr:.2f}", f"{wd:.2f}"],
+                          on_line=lambda s: (out.append(s), log("  " + s)))
         ok, d, verd = _parse("\n".join(out))
         have4 = all(os.path.exists(os.path.join(stage, k + ".wav")) for k in DELIV)
+        if rc != 0 and not have4:
+            # the engine crashed (out of memory, ...): that says nothing about the tone, so
+            # don't search tones - free what we can and run the same settings once more
+            crashes += 1
+            if crashes > 1:
+                log("  !! the engine failed twice on this song - stopping it here"); break
+            log("  !! the engine stopped with an error (see above) - retrying the same settings once"
+                + (" after the next song's separation finishes (frees memory)" if on_crash else ""))
+            if on_crash:
+                on_crash()
+            i -= 1
+            continue
         log(f"  attempt {i}: {ok}/6  tonal={_tonal(d):.1f}  params=({sh},{air},{nar},{pr},{wd})")
         if best is None or ok > best[0] or (ok == best[0] and _tonal(d) < _tonal(best[3])):
             best = (ok, (sh, air, nar, pr, wd), _snapshot(stage), d)
@@ -280,6 +301,11 @@ def _master_attempts(audio, outdir, care, log, variants, tag, name, stage):
         if i == attempts and lim is LIMITS_NORMAL:
             widen("not 6/6 after the usual attempts")
 
+    if best is None:                       # every run crashed: nothing to deliver for this song
+        shutil.rmtree(stage, ignore_errors=True)
+        log(f"=> FAILED {os.path.basename(audio)} - no master (see the error above); run it again "
+            f"later - finished songs are skipped")
+        return {"ok": -1, "reason": "engine-failed", "outdir": outdir}
     bok, bpar, bsnap, bd = best
     if care and bok >= 6 and _tonal(bd) >= 1.2:
         rp = _refine(bpar, bd, lim)
@@ -373,6 +399,11 @@ class _Prefetch:
         t.start()
         self.th[tag] = t
 
+    def settle(self):
+        """wait for any separation running now (it stays cached for when its song comes)."""
+        for t in list(self.th.values()):
+            t.join()
+
     def ready(self, audio):
         """wait until this song's stems are cached (its own separation then is a cache hit)."""
         t = self.th.pop(_safe_tag(audio), None)
@@ -382,7 +413,7 @@ class _Prefetch:
 
 
 def batch(folder, outroot, care=True, log=print, sep=None, shifts=1, variants=None,
-          dry=True, guard=True, tune=False, exciter=False):
+          dry=True, guard=True, tune=False, exciter=False, beauty=0.0, cleanvox=True):
     files = sorted({p for e in AUDIO_EXT for p in glob.glob(os.path.join(folder, "*" + e))})
     if not files:
         log("!! No audio in the folder."); return
@@ -399,11 +430,16 @@ def batch(folder, outroot, care=True, log=print, sep=None, shifts=1, variants=No
         if i < len(jobs):
             pf.start(jobs[i][0])
         r = master_one(f, od, care=care, log=log, sep=sep, shifts=shifts, variants=variants,
-                       dry=dry, guard=guard, tune=tune, exciter=exciter)
+                       dry=dry, guard=guard, tune=tune, exciter=exciter, beauty=beauty, cleanvox=cleanvox,
+                       on_crash=pf.settle)
         res.append((name, r.get("ok", -1)))
     log("\n=== BATCH SUMMARY ===")
     for name, k in res:
-        log(f"  {k}  {name}")
+        log(f"  {'FAILED' if k < 0 else f'{k}/6':6s}  {name}")
+    failed = [name for name, k in res if k < 0]
+    if failed:
+        log(f"  {len(failed)} song(s) without a master: run the batch again on the same folders - "
+            f"finished songs are skipped, only these are redone")
 
 
 def _stem_styles(pm, voxfile, outdir, styles, log):
@@ -427,10 +463,10 @@ def _stem_styles(pm, voxfile, outdir, styles, log):
     _variants(tag, outdir, log, styles)
 
 
-def stemmix(stemdir, voxfile, outdir, vox=-3.0, care=True, log=print, variants=None, dry=True, guard=True, tune=False, exciter=False):
+def stemmix(stemdir, voxfile, outdir, vox=-3.0, care=True, log=print, variants=None, dry=True, guard=True, tune=False, exciter=False, beauty=0.0, cleanvox=True):
     E.apply_env()
     _gpu(log)
-    _opts(dry, guard, tune, exciter)
+    _opts(dry, guard, tune, exciter, beauty, cleanvox)
     os.makedirs(outdir, exist_ok=True)
     pm = os.path.join(E.WORK, "sm_" + _safe_tag(voxfile))
     os.makedirs(pm, exist_ok=True)
@@ -492,12 +528,12 @@ def stemmix(stemdir, voxfile, outdir, vox=-3.0, care=True, log=print, variants=N
 
 
 # ------------------------------------------------------------------ styles & tune only
-def styles_only(path, outdir, variants=None, tune=False, dry=True, guard=True, sep=None, log=print, exciter=False):
+def styles_only(path, outdir, variants=None, tune=False, dry=True, guard=True, sep=None, log=print, exciter=False, beauty=0.0, cleanvox=True):
     """Styles & Tune tab: any audio (file or folder) -> only the picked master styles
     and/or the tuned version (TUNED MIX + ACAPELLA TUNED). No MASTER/INSTRUMENTAL/APPLE."""
     E.apply_env()
     _gpu(log)
-    _opts(dry, guard, tune, exciter)
+    _opts(dry, guard, tune, exciter, beauty, cleanvox)
     ids = _style_list(variants)
     if not ids and not tune:
         log("!! Mark at least one style or the pitch correction."); return
@@ -614,7 +650,7 @@ def _regulate(src, dst_dir, kind, target_lufs, tp, log):
 
 
 def distribute(audio, outdir, target_lufs=-9.5, tp=-1.0, split=True, clean=False, log=print,
-               sep=None, variants=None, dry=True, guard=True, tune=False, exciter=False):
+               sep=None, variants=None, dry=True, guard=True, tune=False, exciter=False, beauty=0.0, cleanvox=True):
     """Make a finished audio distribution-ready: one static gain to the target loudness
     + true-peak limit. Outputs MASTER (and, when split=True, INSTRUMENTAL + ACAPELLA via Demucs),
     each as WAV 48k/24 + WAV 44.1k/16 + MP3 320. clean=True runs an AI clean pass
@@ -623,7 +659,7 @@ def distribute(audio, outdir, target_lufs=-9.5, tp=-1.0, split=True, clean=False
     file's own range before the limiter; variants -> the picked master styles too."""
     E.apply_env()
     _gpu(log)
-    _opts(dry, guard, tune, exciter)
+    _opts(dry, guard, tune, exciter, beauty, cleanvox)
     os.makedirs(outdir, exist_ok=True)
     name = os.path.splitext(os.path.basename(audio))[0]
     i0, lra0, tp0 = _ebur(audio)
@@ -655,7 +691,7 @@ def distribute(audio, outdir, target_lufs=-9.5, tp=-1.0, split=True, clean=False
                 vc = vcl
 
     def _g(src, kind):
-        if not guard and not (exciter and kind != "ACAPELLA"):
+        if not guard and not ((exciter or beauty) and kind != "ACAPELLA"):
             return src
         dst = os.path.join(E.WORK, f"guard_{tag}_{kind}.wav")
         rc = E.run_engine("guard.py", [os.path.abspath(src), dst, kind], on_line=lambda s: log(f"  {kind}: " + s))
@@ -675,7 +711,9 @@ def distribute(audio, outdir, target_lufs=-9.5, tp=-1.0, split=True, clean=False
         f.write(f"{name}\ninput: {i0} LUFS / peak {tp0} dBFS / LRA {lra0}\n"
                 f"target: {target_lufs} LUFS, true-peak <= {tp} dBTP\n"
                 f"AI clean: {'yes' if clean else 'no'}   band guard: {'yes' if guard else 'no'}   "
-                f"exciter: {'yes' if exciter else 'no'}\n\n")
+                f"exciter: {'yes' if exciter else 'no'}   "
+                f"beauty maximizer: {f'{beauty:.0%}' if beauty else 'no'}   "
+                f"clean voice: {'yes' if cleanvox else 'no'}\n\n")
         for k, v in res.items():
             f.write(f"{k}: {v[0]} LUFS / TP {v[2]} dBTP / LRA {v[1]}\n")
         f.write("\nper track: WAV 48k/24, WAV 44.1k/16, MP3 320\n")
@@ -684,7 +722,7 @@ def distribute(audio, outdir, target_lufs=-9.5, tp=-1.0, split=True, clean=False
 
 
 def distribute_batch(folder, outroot, target_lufs=-9.5, tp=-1.0, split=True, clean=False, log=print,
-                     sep=None, variants=None, dry=True, guard=True, tune=False, exciter=False):
+                     sep=None, variants=None, dry=True, guard=True, tune=False, exciter=False, beauty=0.0, cleanvox=True):
     files = sorted({p for e in AUDIO_EXT for p in glob.glob(os.path.join(folder, "*" + e))})
     if not files:
         log("!! No audio in the folder."); return
@@ -702,7 +740,7 @@ def distribute_batch(folder, outroot, target_lufs=-9.5, tp=-1.0, split=True, cle
             if i < len(jobs):
                 pf.start(jobs[i][0])
         distribute(f, od, target_lufs=target_lufs, tp=tp, split=split, clean=clean, log=log, sep=sep,
-                   variants=variants, dry=dry, guard=guard, tune=tune, exciter=exciter)
+                   variants=variants, dry=dry, guard=guard, tune=tune, exciter=exciter, beauty=beauty, cleanvox=cleanvox)
 
 
 def _cli():
@@ -722,6 +760,10 @@ def _cli():
         p.add_argument("--no-dry-bass", action="store_true"); p.add_argument("--no-guard", action="store_true")
         p.add_argument("--tune", action="store_true", help="natural pitch correction of the vocal")
         p.add_argument("--exciter", action="store_true", help="harmonic exciter on the master")
+        p.add_argument("--beauty", type=float, default=0.0, metavar="AMOUNT",
+                       help="beauty maximizer 0..1 (e.g. 0.5): tame harsh, lift masked tones")
+        p.add_argument("--no-clean-voice", action="store_true",
+                       help="keep hum / mouth clicks / headphone leak / gaps in the vocal")
         p.add_argument("--cpu", action="store_true", help="don't use the NVIDIA GPU (GPU edition)")
     d.add_argument("--lufs", type=float, default=-9.5); d.add_argument("--tp", type=float, default=-1.0)
     d.add_argument("--no-split", action="store_true"); d.add_argument("--clean", action="store_true")
@@ -730,7 +772,8 @@ def _cli():
     if ns.cpu:
         os.environ["BREKEM_GPU"] = "0"
     st = True if ns.styles.strip().lower() == "all" else [x.strip() for x in ns.styles.split(",") if x.strip()]
-    kw = dict(variants=st, dry=not ns.no_dry_bass, guard=not ns.no_guard, tune=ns.tune, exciter=ns.exciter)
+    kw = dict(variants=st, dry=not ns.no_dry_bass, guard=not ns.no_guard, tune=ns.tune, exciter=ns.exciter, beauty=ns.beauty,
+              cleanvox=not ns.no_clean_voice)
     if ns.cmd == "master":
         master_one(ns.audio, ns.outdir, care=not ns.fast, sep=ns.sep, shifts=ns.shifts, **kw)
     elif ns.cmd == "batch":

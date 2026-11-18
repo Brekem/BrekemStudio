@@ -1,11 +1,31 @@
-## BREKEM STUDIO 3.5.0
+## BREKEM STUDIO 3.6.0
 
 **Dos instaladores. Escoge uno:**
 
 - **Tienes tarjeta NVIDIA (GTX 16, RTX 20 / 30 / 40 / 50): edición GPU.** Descarga
-  `BREKEM.STUDIO.3.5.0.GPU.Setup.exe` **y todos los archivos `.bin`** que tienen el mismo
+  `BREKEM.STUDIO.3.6.0.GPU.Setup.exe` **y todos los archivos `.bin`** que tienen el mismo
   nombre, en una carpeta vacía. Abre el `.exe`: él solo usa los `.bin`.
-- **No tienes NVIDIA: edición normal.** Descarga `BREKEM.STUDIO.3.5.0.Setup.exe`.
+- **No tienes NVIDIA: edición normal.** Descarga `BREKEM.STUDIO.3.6.0.Setup.exe`.
+
+### Nuevo en 3.6: solo la voz, combinar takes y un maximizer que realza lo bonito
+- **Clean voice** (Extra, marcado por defecto): en la voz queda solo la voz. Quita el beat
+  que se filtra de los audífonos al micrófono, el zumbido eléctrico (50/60 Hz), los clics
+  de boca y el ruido entre frases (con una puerta suave que no corta los finales de palabra).
+  En la voz separada de una canción quita zumbido y clics.
+- **Record → Clean take**: limpia una toma y la deja al lado (`take_NN_clean.wav`) para
+  escucharla antes de masterizar.
+- **Record → Combine takes**: graba la canción por partes (los coros en una take, los
+  versos en otra, o tú y tu feat cada uno en la suya), selecciona 2 o 3 takes con Ctrl+clic
+  y se juntan solas: cada una limpia, al mismo volumen y en su lugar del beat. Donde dos
+  takes cantan lo mismo: dejar las dos (dúo / doble) o quedarse con la más nueva.
+- **Record → Name take...**: ponle nombre a una toma (`take_02_pana`).
+- **Beauty maximizer** (Extra, con cantidad 10-100 %): baja las resonancias ásperas solo
+  mientras suenan, realza las notas que quedan tapadas sin cambiar la ecualización de la
+  canción, y sube el cuerpo entre golpes para que el limitador aplaste menos la batería.
+- **Todas las pestañas tienen scroll** (barra y rueda del mouse) y la consola es más baja.
+- **Lote más seguro**: si una canción se queda sin memoria (el master y la separación de
+  la siguiente a la vez), espera a que termine la separación y la reintenta. Si vuelve a
+  fallar sale como FAILED en el resumen; corre el lote otra vez y solo rehace esas.
 
 ### Nuevo en 3.5: graba tu voz sobre el beat (pestaña Record)
 - **Pestaña Record (la primera)**: escoges el beat, te pones los audífonos y le das a

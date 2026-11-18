@@ -31,7 +31,9 @@ from acap_pro import (SR, load, rms, run, ebur, bands_arr, deepfilter, vbus, glu
 import re, matchering as mg
 import stems as ST
 import tune as TU
+import cleantake as CT
 import exciter as EX
+import beauty as BE
 try:
     mg.log(info_handler=lambda *a, **k: None, warning_handler=lambda *a, **k: None)
 except Exception:
@@ -205,7 +207,9 @@ def heavy():
     """-> (y = premaster after matchering + exciter, guard reference or None, loudness target);
     also writes INSTRUMENTAL + ACAPELLA."""
     # ================== VOCAL PRO ==================
-    voc = load(VC); n = len(voc); r0 = rms(voc)
+    voc = load(VC); n = len(voc)
+    voc = CT.clean_voice(voc, SR, full=False, log=L) if CT.enabled() else voc   # hum + mouth clicks
+    r0 = rms(voc)
     RAW = voc.copy()
     VACT = ST.vocal_activity(RAW, load(IC))               # where the vocal stem really holds a vocal
     if TU.enabled():                                  # natural pitch correction (whole notes, vibrato kept)
@@ -237,6 +241,7 @@ def heavy():
     pB = libmaster(w(os.path.join(WORK, "tv_m0.wav"), mix), os.path.join(WORK, "tv_m1.wav"))
     y = bbmatch(load(pB)); pk = np.max(np.abs(y)); y = y*(0.995/pk) if pk > 0.995 else y
     y = matchering_avg(w(os.path.join(WORK, "tv_m2.wav"), y), "tv")
+    if BE.enabled(): y = BE.beautify(y, log=L)
     if EX.enabled(): y = EX.excite(y, log=L)    # harmonics before the tone moves, so the verdict loop sees them
     # reference mode: the references set the tone, so the guard only limits band PEAKS on the master.
     # (holding the tone to the original song undid the matching: a -8 dB air cut came back +3 dB)
@@ -247,6 +252,7 @@ def heavy():
     pk = np.max(np.abs(inst)); inst = inst*(0.99/pk) if pk > 0.99 else inst
     pB = libmaster(w(os.path.join(WORK, "tv_i0.wav"), inst), os.path.join(WORK, "tv_i1.wav"))
     yi = mono_narrow(polish(load(pB)), 0.82)                # estrecha ANTES de limitar -> mas headroom
+    if BE.enabled(): yi = BE.beautify(yi, log=L)
     if EX.enabled(): yi = EX.excite(yi, log=L)
     yi = bq_shelf(yi, 75.0, SHELF_DB, False)                # mismo shelf de graves que el master
     if ST.guard_enabled():

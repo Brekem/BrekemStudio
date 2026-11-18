@@ -31,7 +31,7 @@ AUDIO_FT = (("Audio", "*.wav *.flac *.mp3 *.m4a *.aac *.ogg *.opus *.aif *.aiff 
 
 class Console(tk.Text):
     def __init__(self, master):
-        super().__init__(master, height=18, wrap="word", bg="#0f1113", fg="#d7dde3",
+        super().__init__(master, height=8, wrap="word", bg="#0f1113", fg="#d7dde3",
                          insertbackground="#d7dde3", font=("Consolas", 9), relief="flat")
         self.configure(state="disabled")
         self.q = queue.Queue()
@@ -63,11 +63,15 @@ class App(ttk.Frame):
         root.columnconfigure(0, weight=1)
         root.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
-        self.rowconfigure(1, weight=1)
+        self.rowconfigure(0, weight=3)    # the tabs get most of the window...
+        self.rowconfigure(1, weight=1)    # ...the console the rest
         self.busy = False
 
         nb = ttk.Notebook(self)
         nb.grid(row=0, column=0, sticky="nsew")
+        self.nb = nb
+        self._canvases = []               # one scrolling canvas per tab, in tab order
+        root.bind_all("<MouseWheel>", self._wheel)
         self.tab_record(nb)
         self.tab_master(nb)
         self.tab_batch(nb)
@@ -89,6 +93,36 @@ class App(ttk.Frame):
         self._refresh_refs()
 
     # ---------- helpers ----------
+    def _tab(self, nb, text):
+        """a notebook page that scrolls (scrollbar or mouse wheel) when it is taller than the window."""
+        outer = ttk.Frame(nb)
+        nb.add(outer, text=text)
+        outer.rowconfigure(0, weight=1)
+        outer.columnconfigure(0, weight=1)
+        bg = ttk.Style().lookup("TFrame", "background") or None
+        cv = tk.Canvas(outer, highlightthickness=0, bd=0, background=bg)
+        sb = ttk.Scrollbar(outer, orient="vertical", command=cv.yview)
+        cv.configure(yscrollcommand=sb.set)
+        cv.grid(row=0, column=0, sticky="nsew")
+        sb.grid(row=0, column=1, sticky="ns")
+        f = ttk.Frame(cv, padding=PAD)
+        win = cv.create_window(0, 0, window=f, anchor="nw")
+        f.bind("<Configure>", lambda _e: cv.configure(scrollregion=cv.bbox("all")))
+        cv.bind("<Configure>", lambda e: cv.itemconfigure(win, width=e.width))
+        self._canvases.append(cv)
+        return f
+
+    def _wheel(self, e):
+        """mouse wheel over a tab scrolls that tab (lists, the console and dropdowns keep their own)."""
+        w = e.widget
+        if isinstance(w, str) or not str(w).startswith(str(self.nb)):
+            return
+        if w.winfo_class() in ("Text", "Listbox", "TCombobox", "Scale", "TScale"):
+            return
+        cv = self._canvases[self.nb.index("current")]
+        if cv.yview() != (0.0, 1.0):
+            cv.yview_scroll(int(-e.delta / 120) or (-1 if e.delta > 0 else 1), "units")
+
     def log(self, s):
         self.con.write(s)
 
@@ -119,7 +153,7 @@ class App(ttk.Frame):
             C._GPU_SAID.append(1); self.log(line)
 
     def _opts_panel(self, f, row, styles=()):
-        """styles (each its own [X]) + dry bass / band guard / tuning / exciter [X]; returns a getter."""
+        """styles (each its own [X]) + dry bass / band guard / tuning / exciter / beauty [X]; returns a getter."""
         box = ttk.LabelFrame(f, text="Master styles  (mark with X the ones you want, each comes out separately)",
                              padding=6)
         box.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(10, 0))
@@ -141,8 +175,22 @@ class App(ttk.Frame):
         b4, exc = self._xbox(ext, "Exciter - new harmonics: brighter, airier top + bass you hear on phones and "
                                   "earbuds (no hiss lifted)", False)
         b4.grid(row=3, column=0, sticky="w")
+        bt = ttk.Frame(ext)
+        bt.grid(row=4, column=0, sticky="ew")
+        b5, bea = self._xbox(bt, "Beauty maximizer - harsh rings pulled down, buried notes lifted, body between "
+                                 "hits raised. Amount:", False)
+        b5.pack(side="left")
+        amt = tk.DoubleVar(value=50.0)
+        amt_lbl = ttk.Label(bt, text="50%", width=5)
+        ttk.Scale(bt, from_=10.0, to=100.0, variable=amt, orient="horizontal", length=160,
+                  command=lambda v: amt_lbl.configure(text=f"{float(v):.0f}%")).pack(side="left", padx=(6, 4))
+        amt_lbl.pack(side="left")
+        b6, cln = self._xbox(ext, "Clean voice - only the voice: headphone leak, mains hum, mouth clicks and the "
+                                  "gaps between phrases removed", True)
+        b6.grid(row=5, column=0, sticky="w")
         return lambda: dict(variants=[sid for sid, v in picks if v.get()], dry=dry.get(), guard=grd.get(),
-                            tune=tun.get(), exciter=exc.get())
+                            tune=tun.get(), exciter=exc.get(),
+                            beauty=round(amt.get()) / 100.0 if bea.get() else 0.0, cleanvox=cln.get())
 
     def _sep_row(self, f, row):
         """'Separation' dropdown; returns a getter for the chosen Demucs model."""
@@ -198,8 +246,7 @@ class App(ttk.Frame):
 
     # ---------- tab: record ----------
     def tab_record(self, nb):
-        f = ttk.Frame(nb, padding=PAD)
-        nb.add(f, text="Record")
+        f = self._tab(nb, "Record")
         f.columnconfigure(1, weight=1)
         self.r_beat = tk.StringVar()
         self.r_in = tk.StringVar()
@@ -276,13 +323,29 @@ class App(ttk.Frame):
         tk_ = ttk.LabelFrame(f, text="Takes", padding=6)
         tk_.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(10, 0))
         tk_.columnconfigure(0, weight=1)
-        self.r_takes = tk.Listbox(tk_, height=5, exportselection=False)
+        self.r_takes = tk.Listbox(tk_, height=5, exportselection=False, selectmode="extended")
         self.r_takes.grid(row=0, column=0, sticky="ew")
         tb = ttk.Frame(tk_)
         tb.grid(row=1, column=0, sticky="w", pady=(6, 0))
         ttk.Button(tb, text="▶  Play with beat", command=self._rec_play).pack(side="left")
+        ttk.Button(tb, text="Clean take", command=self._rec_clean).pack(side="left", padx=(6, 0))
+        ttk.Button(tb, text="Name take...", command=self._rec_rename).pack(side="left", padx=(6, 0))
         ttk.Button(tb, text="Delete take", command=self._rec_del).pack(side="left", padx=6)
         ttk.Button(tb, text="Open folder", command=self._rec_open_dir).pack(side="left")
+        cb = ttk.Frame(tk_)
+        cb.grid(row=2, column=0, sticky="w", pady=(8, 0))
+        ttk.Button(cb, text="Combine takes", command=self._rec_combine).pack(side="left")
+        ttk.Label(cb, text="  where two takes sing the same part:").pack(side="left")
+        self.r_overlap = tk.StringVar(value="both")
+        ttk.Radiobutton(cb, text="keep both (feat / double)", value="both",
+                        variable=self.r_overlap).pack(side="left", padx=(6, 0))
+        ttk.Radiobutton(cb, text="keep the newest take", value="newest",
+                        variable=self.r_overlap).pack(side="left", padx=(6, 0))
+        ttk.Label(tk_, text="Ctrl+click 2 or 3 takes (e.g. the chorus take + the verses take, or yours + your "
+                            "feat's), then Combine: each is cleaned, brought to the same level and laid on the "
+                            "beat -> take_NN_comb.wav.", foreground="#7b8794", wraplength=900, justify="left").grid(
+            row=3, column=0, sticky="w", pady=(4, 0))
+
 
         ttk.Label(f, text="Output folder:").grid(row=7, column=0, sticky="w", pady=(10, 0))
         ttk.Entry(f, textvariable=self.r_dir).grid(row=7, column=1, sticky="ew", padx=6, pady=(10, 0))
@@ -363,14 +426,31 @@ class App(ttk.Frame):
         beat = self.r_beat.get().strip()
         if not beat:
             return
-        for p in R.list_takes(beat):
-            self.r_takes.insert("end", os.path.basename(p))
+        names = [os.path.basename(p) for p in R.list_takes(beat)]
+        for n in names:
+            self.r_takes.insert("end", n)
         if select:
             names = self.r_takes.get(0, "end")
             if select in names:
                 k = names.index(select)
                 self.r_takes.selection_set(k)
                 self.r_takes.see(k)
+
+    def _rec_rename(self):
+        take = self._rec_take()
+        if not take:
+            return
+        from tkinter import simpledialog
+        label = simpledialog.askstring(APP, "Name for this take (e.g. the feat artist, 'chorus', 'adlibs'):",
+                                       parent=self.root)
+        if not label:
+            return
+        try:
+            new = R.rename_take(take, label)
+        except (ValueError, OSError) as e:
+            messagebox.showwarning(APP, str(e))
+            return
+        self._rec_refresh_takes(select=os.path.basename(new))
 
     def _rec_take(self):
         sel = self.r_takes.curselection()
@@ -545,6 +625,47 @@ class App(ttk.Frame):
             self._rec_lat_label()
         self._bg_then(lambda: R.calibrate(*devs, log=self.log), done)
 
+    def _rec_clean(self):
+        """take_NN.wav -> take_NN_clean.wav (only the voice), listed next to it to compare."""
+        take = self._rec_take()
+        if not take:
+            return
+        if take.endswith(("_clean.wav", "_comb.wav")):
+            messagebox.showinfo(APP, "This take is already cleaned.")
+            return
+        beat = self.r_beat.get().strip()
+        out = take[:-4] + "_clean.wav"
+        self.log(f"--- clean take: {os.path.basename(take)}")
+
+        def job():
+            rc = E.run_engine("cleantake.py", [take, out, beat], on_line=lambda s: self.log("  " + s))
+            if rc == 0 and os.path.exists(out):
+                self.root.after(0, lambda: self._rec_refresh_takes(select=os.path.basename(out)))
+            else:
+                self.log("!! clean take failed")
+        self._run_bg(job, needs_refs=False)
+
+    def _rec_combine(self):
+        """the selected takes (each holding only the parts sung in it) -> one vocal take."""
+        beat = self.r_beat.get().strip()
+        sel = self.r_takes.curselection()
+        if len(sel) < 2:
+            messagebox.showinfo(APP, "Ctrl+click at least 2 takes to combine."); return
+        takes = [os.path.join(R.takes_dir(beat), self.r_takes.get(i)) for i in sel]
+        takes.sort(key=os.path.getmtime)                 # oldest first: "newest" means the later recording
+        out = R.next_take_path(beat)[:-4] + "_comb.wav"
+        self.log(f"--- combine: {', '.join(os.path.basename(t) for t in takes)}")
+
+        def job():
+            rc = E.run_engine("cleantake.py", ["--combine", out, beat, self.r_overlap.get()] + takes,
+                              on_line=lambda s: self.log("  " + s))
+            if rc == 0 and os.path.exists(out):
+                self.log(f"=> {os.path.basename(out)} - play it with the beat, then Mix and master")
+                self.root.after(0, lambda: self._rec_refresh_takes(select=os.path.basename(out)))
+            else:
+                self.log("!! combine failed")
+        self._run_bg(job, needs_refs=False)
+
     def _go_rec_mix(self):
         take = self._rec_take()
         beat, o = self.r_beat.get().strip(), self.r_dir.get().strip()
@@ -553,6 +674,8 @@ class App(ttk.Frame):
         if not o:
             messagebox.showwarning(APP, "Pick an output folder."); return
         split, sep, vox, kw = self.r_split.get(), self.r_sep(), float(self.r_vox_off.get()), self.r_opts()
+        if take.endswith(("_clean.wav", "_comb.wav")):
+            kw["cleanvox"] = False     # already cleaned (Clean take / Combine): don't do it twice
 
         def job():
             d = R.beat_stems(beat, split, sep, self.log)
@@ -561,8 +684,7 @@ class App(ttk.Frame):
 
     # ---------- tab: master ----------
     def tab_master(self, nb):
-        f = ttk.Frame(nb, padding=PAD)
-        nb.add(f, text="Master")
+        f = self._tab(nb, "Master")
         f.columnconfigure(1, weight=1)
         self.m_in = tk.StringVar()
         self.m_out = tk.StringVar()
@@ -595,8 +717,7 @@ class App(ttk.Frame):
 
     # ---------- tab: batch ----------
     def tab_batch(self, nb):
-        f = ttk.Frame(nb, padding=PAD)
-        nb.add(f, text="Batch")
+        f = self._tab(nb, "Batch")
         f.columnconfigure(1, weight=1)
         self.b_in = tk.StringVar()
         self.b_out = tk.StringVar()
@@ -624,8 +745,7 @@ class App(ttk.Frame):
 
     # ---------- tab: mix from stems ----------
     def tab_stem(self, nb):
-        f = ttk.Frame(nb, padding=PAD)
-        nb.add(f, text="Mix from stems")
+        f = self._tab(nb, "Mix from stems")
         f.columnconfigure(1, weight=1)
         self.s_stems = tk.StringVar()
         self.s_vox = tk.StringVar()
@@ -662,8 +782,7 @@ class App(ttk.Frame):
 
     # ---------- shared distribute panel ----------
     def _distrib_panel(self, nb, tab_text, clean):
-        f = ttk.Frame(nb, padding=PAD)
-        nb.add(f, text=tab_text)
+        f = self._tab(nb, tab_text)
         f.columnconfigure(1, weight=1)
         d_in = tk.StringVar()
         d_out = tk.StringVar()
@@ -723,8 +842,7 @@ class App(ttk.Frame):
 
     # ---------- tab: styles & tune only ----------
     def tab_styles(self, nb):
-        f = ttk.Frame(nb, padding=PAD)
-        nb.add(f, text="Styles & Tune")
+        f = self._tab(nb, "Styles & Tune")
         f.columnconfigure(1, weight=1)
         self.y_in = tk.StringVar()
         self.y_out = tk.StringVar()
@@ -758,8 +876,7 @@ class App(ttk.Frame):
 
     # ---------- tab: references ----------
     def tab_refs(self, nb):
-        f = ttk.Frame(nb, padding=PAD)
-        nb.add(f, text="References")
+        f = self._tab(nb, "References")
         f.columnconfigure(0, weight=1)
         f.rowconfigure(1, weight=1)
         ttk.Label(f, text="Drop in 2-4 commercial songs whose sound you want to match.\n"

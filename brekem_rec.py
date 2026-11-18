@@ -187,6 +187,20 @@ def next_take_path(beat):
     return os.path.join(takes_dir(beat), f"take_{(max(nums) + 1) if nums else 1:02d}.wav")
 
 
+def rename_take(path, label):
+    """take_03.wav + "jaquemate" -> take_03_jaquemate.wav (the number stays, so it still sorts
+    and counts as a take). Returns the new path."""
+    m = re.match(r"(take_\d+)", os.path.basename(path))
+    tag = re.sub(r"[^A-Za-z0-9_\-]", "", label.strip().replace(" ", "_"))[:30]
+    if not m or not tag:
+        raise ValueError("use letters / numbers for the name")
+    new = os.path.join(os.path.dirname(path), f"{m.group(1)}_{tag}.wav")
+    if os.path.exists(new):
+        raise ValueError(f"{os.path.basename(new)} already exists")
+    os.rename(path, new)
+    return new
+
+
 # ---------------------------------------------------------------- duplex session
 class Session:
     """plays `play` (n, 2) on out_dev while recording in_dev, both in one stream.
