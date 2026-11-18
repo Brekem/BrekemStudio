@@ -1,6 +1,8 @@
 """Clean voice: leave only the voice (BREKEM_CLEANVOX=1, the "Clean voice" [X] in Extras;
 the "Clean take" button on the Record tab runs it on one take so you can hear it first).
 Usage:  python cleantake.py <take.wav> <out.wav> [<beat file>]
+        python cleantake.py --combine <out.wav> <beat file | ""> both|newest <take> <take> [...]
+          (several takes of one song -> one vocal, see combine())
 
   1 BLEED   the beat leaking from the headphones into the mic is subtracted. A take is on the
             beat's timeline (Record shifted it by the measured round trip), so the leak is the
@@ -193,7 +195,93 @@ def clean_voice(x, sr, beat=None, full=True, log=None):
     return X if two else X[:, 0]
 
 
+def _segments(active, hop, sr, join_s=1.0, min_s=0.5):
+    """frames where active -> [(start s, end s)], joining gaps under join_s, dropping bits under min_s."""
+    out = []
+    idx = np.flatnonzero(active)
+    if not len(idx):
+        return out
+    fs = hop / sr
+    a = b = idx[0]
+    for k in idx[1:]:
+        if (k - b) * fs > join_s:
+            out.append((a * fs, (b + 1) * fs))
+            a = k
+        b = k
+    out.append((a * fs, (b + 1) * fs))
+    return [(s, e) for s, e in out if e - s >= min_s]
+
+
+def _mmss(t):
+    return f"{int(t // 60)}:{int(t % 60):02d}"
+
+
+def combine(paths, beat_path=None, overlap="both", log=None):
+    """takes recorded over the same beat, each holding only the parts sung in it (chorus in one,
+    verses in another, or each artist in his own) -> one vocal: every take cleaned (so where it
+    was not sung it is silent), brought to the same singing level, then summed.
+    overlap: where two takes both sing - "both" keeps both (a feat, a double), "newest" keeps
+    only the later take there (a part sung again because the first one was not right).
+    -> (vocal mono, sr)."""
+    say = log or (lambda m: None)
+    voc, sr, beat = [], None, None
+    for p in paths:
+        x, s = sf.read(p, dtype="float64")
+        x = x.mean(1) if x.ndim > 1 else x
+        if sr is None:
+            sr = s
+            if beat_path and os.path.exists(beat_path):
+                beat = load_beat(beat_path, sr, len(x))
+        elif s != sr:                                   # recorded on another device: to the first rate
+            g = np.gcd(int(s), int(sr))
+            x = sig.resample_poly(x, sr // g, s // g)
+        say(f"--- {os.path.basename(p)}")
+        voc.append(clean_voice(x, sr, beat=beat, full=True, log=say))
+    n = max(len(v) for v in voc)
+    voc = [np.pad(v, (0, n - len(v))) for v in voc]
+
+    # where each take sings, and how loud it sings there
+    masks, levels = [], []
+    for v in voc:
+        db, hop, sing, rec = _voice_frames(v, sr)
+        on = sing > 0.5
+        masks.append(sing)
+        levels.append(10 * np.log10(np.mean(10 ** (db[on] / 10))) if on.any() else None)
+    known = [l for l in levels if l is not None]
+    target = float(np.median(known)) if known else 0.0
+    out = np.zeros(n)
+    for i, (p, v, l) in enumerate(zip(paths, voc, levels)):
+        if l is None:
+            say(f"{os.path.basename(p)}: no singing found - left out")
+            continue
+        g = float(np.clip(target - l, -9.0, 9.0))
+        w = 10 ** (g / 20)
+        if overlap == "newest":                         # later takes win where they sing
+            for j in range(i + 1, len(voc)):
+                if levels[j] is not None:
+                    w = w * (1.0 - np.clip(gate_gain(masks[j], hop, n), 0.0, 1.0))
+        out += v * w
+        parts = ", ".join(f"{_mmss(a)}-{_mmss(b)}" for a, b in _segments(masks[i] > 0.5, hop, sr, join_s=3.0))
+        say(f"{os.path.basename(p)}: {g:+.1f} dB to sit level with the others, sings {parts or '-'}")
+    both = np.sum([m > 0.5 for m, l in zip(masks, levels) if l is not None], axis=0) >= 2
+    ov = _segments(both, hop, sr, join_s=3.0, min_s=0.5) if np.ndim(both) else []
+    if ov:
+        say(("two takes sing together at " if overlap == "both" else "sung twice, newest take kept at ")
+            + ", ".join(f"{_mmss(a)}-{_mmss(b)}" for a, b in ov))
+    pk = float(np.max(np.abs(out))) if n else 0.0
+    if pk > 0.99:                                       # stacked voices past full scale: down evenly
+        out *= 0.99 / pk
+        say(f"stacked voices peaked at {20 * np.log10(pk):+.1f} dBFS - lowered as a whole")
+    return out, sr
+
+
 def main():
+    if sys.argv[1] == "--combine":                      # cleantake.py --combine out.wav beat both|newest take...
+        dst, beat_path, overlap, takes = sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5:]
+        y, sr = combine(takes, beat_path or None, overlap, log=lambda m: print(m, flush=True))
+        sf.write(dst, np.clip(y, -1.0, 1.0).astype(np.float32), sr, subtype="PCM_24")
+        print("DONE combine", flush=True)
+        return
     src, dst = sys.argv[1], sys.argv[2]
     beat_path = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] else None
     x, sr = sf.read(src, dtype="float64")
